@@ -12,12 +12,17 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from api import __version__
+from api.errors import ProblemException, problem_exception_handler
+from api.tickets.router import router as tickets_router
 
 app = FastAPI(
     title="kb-support",
     description="Модуль службы поддержки reHome (helpdesk-ядро по ТЗ v2.2)",
     version=__version__,
 )
+
+app.add_exception_handler(ProblemException, problem_exception_handler)
+app.include_router(tickets_router)
 
 
 class HealthzResponse(BaseModel):

@@ -99,6 +99,10 @@ pythonpath = ["src"]
 [tool.coverage.run]
 source = ["src/api"]
 branch = true
+# FastAPI TestClient выполняет ASGI-приложение в рабочем потоке (anyio portal),
+# а async-SQLAlchemy исполняет DB-операции в greenlet'е. Без этого код эндпоинтов
+# и репозитория не измеряется. Делает покрытие точнее.
+concurrency = ["thread", "greenlet"]
 
 [tool.coverage.report]
 fail_under = 80
