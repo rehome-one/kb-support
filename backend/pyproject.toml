@@ -29,6 +29,14 @@ dev = [
     "pytest-cov>=6.0,<7",
     "ruff==0.7.4",
     "mypy>=1.13,<2",
+    # Контрактные тесты (#4): валидация реальных ответов против docs/openapi.yaml
+    # (OpenAPI 3.1 схемы = JSON Schema 2020-12). Тянет `referencing` для $ref.
+    "jsonschema>=4.20,<5",
+    # Парсинг OpenAPI yaml (контрактные тесты + scripts/generate_production_openapi.py).
+    "pyyaml>=6,<7",
+    # Type-stubs для mypy strict.
+    "types-jsonschema",
+    "types-PyYAML",
 ]
 
 [tool.setuptools.packages.find]

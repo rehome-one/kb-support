@@ -55,6 +55,27 @@ open http://localhost:8000/docs
 | `make revision m="<message>"` | Создать новую миграцию (autogenerate) |
 | `make arch-check` | AT-001 — проверка архитектурной константы (см. правило 7 CLAUDE.md) |
 
+## Контрактные тесты (AT-002)
+
+`tests/contract/` проверяют, что реализация не дрейфует от контракта
+`docs/openapi.yaml` (production-spec, см. #11). Реальные ответы приложения
+валидируются против схем ответов операций (`jsonschema`; OpenAPI 3.1 = JSON
+Schema 2020-12). Если изменить схему ответа в коде без обновления yaml — тест падает.
+
+```bash
+# Требуют Postgres (как остальные integration-тесты):
+POSTGRES_AVAILABLE=1 KBS_DATABASE_URL=postgresql+asyncpg://... \
+  pytest tests/contract/ -v
+
+# Дополнительно — Prism mock из той же спеки (opt-in, тянет prism через npx):
+RUN_PRISM_CONTRACT=1 POSTGRES_AVAILABLE=1 KBS_DATABASE_URL=... \
+  pytest tests/contract/ -v
+```
+
+В CI контрактные тесты гоняются в job «Backend (Python)» (шаг «Contract tests
+(AT-002)»); Prism-тест там скипается (env не выставлен), jsonschema drift-детектор
+работает на сервисном Postgres.
+
 ## Структура
 
 ```

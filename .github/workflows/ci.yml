@@ -148,6 +148,14 @@ jobs:
         working-directory: backend
         run: pytest --cov=src --cov-fail-under=80
 
+      - name: Contract tests (AT-002)
+        # Соответствие реализации контракту docs/openapi.yaml (#4). Prism-тест
+        # opt-in (RUN_PRISM_CONTRACT) — здесь скипается; jsonschema drift-детектор
+        # против реального приложения работает на сервисном Postgres.
+        if: steps.check.outputs.exists == 'true'
+        working-directory: backend
+        run: pytest tests/contract/ -v
+
   # ============================================================
   # Frontend (Next.js): lint + type + tests
   # Активируется после E2, когда появится frontend/
