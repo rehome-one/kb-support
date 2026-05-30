@@ -36,6 +36,7 @@ class TicketHistoryAction(str, enum.Enum):
     TEAM_CHANGED = "team_changed"
     TAGS_UPDATED = "tags_updated"
     MESSAGE_ADDED = "message_added"
+    RATED = "rated"
 
 
 class TicketHistory(Base):
