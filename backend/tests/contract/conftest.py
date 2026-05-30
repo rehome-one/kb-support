@@ -77,12 +77,15 @@ def operator_client() -> Iterator[TestClient]:
                 await session.rollback()
                 raise
 
-    app.dependency_overrides[get_session] = _session
-    app.dependency_overrides[get_current_principal] = lambda: Principal(
+    # Стабильный оператор на время фикстуры: POST и GET должны идти от ОДНОГО
+    # субъекта, иначе созданная заявка не видна в списке (он владелец).
+    operator = Principal(
         user_id=uuid.uuid4(),
         kind=PrincipalKind.OPERATOR,
         teams=frozenset({TicketTeam.SUPPORT}),
     )
+    app.dependency_overrides[get_session] = _session
+    app.dependency_overrides[get_current_principal] = lambda: operator
     try:
         with TestClient(app) as client:
             yield client
