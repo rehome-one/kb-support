@@ -286,6 +286,125 @@ def test_patch_without_auth_returns_401(client: TestClient) -> None:
     assert resp.status_code == 401
 
 
+# --- TicketMessage (#10) ---
+
+
+def _post_message(
+    client: TestClient, ticket_id: str, body: str, *, is_internal: bool = False, **extra: object
+) -> Response:
+    payload: dict[str, object] = {"body": body, "is_internal": is_internal, **extra}
+    return client.post(f"/api/v1/support/tickets/{ticket_id}/messages", json=payload)
+
+
+def _operator() -> Principal:
+    return Principal(
+        user_id=uuid.uuid4(),
+        kind=PrincipalKind.OPERATOR,
+        teams=frozenset({TicketTeam.SUPPORT}),
+    )
+
+
+def test_internal_note_hidden_from_requester(client: TestClient) -> None:
+    """🔴 NFR-1.3 (блокирует merge): is_internal=true НЕ виден заявителю."""
+    requester = uuid.uuid4()
+    _use(Principal(user_id=requester, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_team(ticket_id, TicketTeam.SUPPORT.value)
+
+    _use(_operator())
+    assert _post_message(client, ticket_id, "INTERNAL NOTE", is_internal=True).status_code == 201
+    assert _post_message(client, ticket_id, "public reply", is_internal=False).status_code == 201
+
+    _use(Principal(user_id=requester, kind=PrincipalKind.REQUESTER))
+    messages = client.get(f"/api/v1/support/tickets/{ticket_id}/messages").json()["data"]
+    bodies = [m["body"] for m in messages]
+    assert "public reply" in bodies
+    assert "INTERNAL NOTE" not in bodies
+    assert all(m["is_internal"] is False for m in messages)
+
+
+def test_operator_sees_internal_and_public(client: TestClient) -> None:
+    requester = uuid.uuid4()
+    _use(Principal(user_id=requester, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_team(ticket_id, TicketTeam.SUPPORT.value)
+
+    _use(_operator())
+    _post_message(client, ticket_id, "INTERNAL", is_internal=True)
+    _post_message(client, ticket_id, "PUBLIC", is_internal=False)
+    messages = client.get(f"/api/v1/support/tickets/{ticket_id}/messages").json()["data"]
+    assert {"INTERNAL", "PUBLIC"} <= {m["body"] for m in messages}
+
+
+def test_requester_cannot_post_internal(client: TestClient) -> None:
+    user = uuid.uuid4()
+    _use(Principal(user_id=user, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    assert _post_message(client, ticket_id, "secret", is_internal=True).status_code == 403
+
+
+def test_operator_can_post_internal_with_author(client: TestClient) -> None:
+    requester = uuid.uuid4()
+    _use(Principal(user_id=requester, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_team(ticket_id, TicketTeam.SUPPORT.value)
+    _use(_operator())
+    resp = _post_message(client, ticket_id, "note", is_internal=True)
+    assert resp.status_code == 201
+    data = resp.json()["data"]
+    assert data["is_internal"] is True
+    assert data["author_type"] == "operator"
+
+
+def test_requester_message_author_derived_from_principal(client: TestClient) -> None:
+    user = uuid.uuid4()
+    _use(Principal(user_id=user, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    resp = _post_message(client, ticket_id, "hello")
+    assert resp.status_code == 201
+    data = resp.json()["data"]
+    assert data["author_type"] == "requester"
+    assert data["author_id"] == str(user)
+    assert data["is_internal"] is False
+
+
+def test_post_message_with_attachments(client: TestClient) -> None:
+    user = uuid.uuid4()
+    _use(Principal(user_id=user, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    file_id = uuid.uuid4()
+    resp = _post_message(client, ticket_id, "see file", attachments=[str(file_id)])
+    assert resp.status_code == 201
+    assert resp.json()["data"]["attachments"] == [str(file_id)]
+
+
+def test_post_message_records_history(client: TestClient) -> None:
+    requester = uuid.uuid4()
+    _use(Principal(user_id=requester, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_team(ticket_id, TicketTeam.SUPPORT.value)
+    _use(_operator())
+    _post_message(client, ticket_id, "note", is_internal=True)
+    actions = [
+        h["action"]
+        for h in client.get(f"/api/v1/support/tickets/{ticket_id}/history").json()["data"]
+    ]
+    assert "message_added" in actions
+
+
+def test_messages_not_found_for_non_owner(client: TestClient) -> None:
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    assert client.get(f"/api/v1/support/tickets/{ticket_id}/messages").status_code == 404
+    assert _post_message(client, ticket_id, "x").status_code == 404
+
+
+def test_messages_unauthenticated_returns_401(client: TestClient) -> None:
+    assert client.get(f"/api/v1/support/tickets/{uuid.uuid4()}/messages").status_code == 401
+    assert _post_message(client, str(uuid.uuid4()), "x").status_code == 401
+
+
 def test_create_returns_201_with_defaults(client: TestClient) -> None:
     user = uuid.uuid4()
     _use(Principal(user_id=user, kind=PrincipalKind.REQUESTER))

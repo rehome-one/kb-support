@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from api.tickets.enums import (
     AccessLevel,
+    AuthorType,
     TicketChannel,
     TicketPriority,
     TicketStatus,
@@ -140,4 +141,49 @@ class TicketHistoryListEnvelope(BaseModel):
     """Конверт ответа со списком строк журнала."""
 
     data: list[TicketHistoryRead]
+    request_id: uuid.UUID
+
+
+class TicketMessageCreate(BaseModel):
+    """Тело POST /tickets/{id}/messages (контракт `TicketMessageCreate`).
+
+    `author_id`/`author_type` НЕ принимаются от клиента — выводятся из принципала
+    (anti-spoofing). `canned_response_id` принимается ради контракта; учёт
+    usage_count — в E6 (CannedResponse).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    body: str = Field(min_length=1)
+    is_internal: bool = False
+    attachments: list[uuid.UUID] | None = None
+    canned_response_id: uuid.UUID | None = None
+
+
+class TicketMessageRead(BaseModel):
+    """Сообщение в ответе (контракт `TicketMessage`)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    ticket_id: uuid.UUID
+    author_id: uuid.UUID | None
+    author_type: AuthorType
+    body: str
+    is_internal: bool
+    attachments: list[uuid.UUID]
+    created_at: datetime.datetime
+
+
+class TicketMessageEnvelope(BaseModel):
+    """Конверт ответа с одним сообщением."""
+
+    data: TicketMessageRead
+    request_id: uuid.UUID
+
+
+class TicketMessageListEnvelope(BaseModel):
+    """Конверт ответа со списком сообщений."""
+
+    data: list[TicketMessageRead]
     request_id: uuid.UUID

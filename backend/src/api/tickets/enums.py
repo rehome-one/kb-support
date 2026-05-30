@@ -95,6 +95,15 @@ class TicketTeam(str, enum.Enum):
     FINANCE = "finance"
 
 
+class AuthorType(str, enum.Enum):
+    """Тип автора сообщения (ТЗ §3.5). Выводится из принципала, не из payload."""
+
+    REQUESTER = "requester"
+    OPERATOR = "operator"
+    SYSTEM = "system"
+    AI = "ai"
+
+
 class AccessLevel(str, enum.Enum):
     """Контур доступа (ADR-0003). PUBLIC/LOGGED/AGENT — публичный контур;
     STAFF/LEGAL/HR_RESTRICTED — внутренний. Не смешивать (CLAUDE.md §«двухконтурность»)."""
