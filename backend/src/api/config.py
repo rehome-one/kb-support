@@ -49,6 +49,10 @@ class Settings(BaseSettings):
             "конфигурируемая политика."
         ),
     )
+    log_level: str = Field(
+        default="INFO",
+        description="Уровень JSON-логирования (DEBUG/INFO/WARNING/ERROR).",
+    )
 
 
 @lru_cache(maxsize=1)
