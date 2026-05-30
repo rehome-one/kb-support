@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import datetime
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, and_, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.principal import Principal
@@ -15,7 +16,33 @@ from api.tickets.enums import AccessLevel, TicketChannel, TicketPriority, Ticket
 from api.tickets.history import TicketHistoryAction, TicketHistoryRepository, record_changes
 from api.tickets.models import Ticket
 from api.tickets.numbering import generate_ticket_number
+from api.tickets.pagination import (
+    SortSpec,
+    decode_cursor,
+    encode_cursor,
+    get_sort_spec,
+    keyset_predicate,
+    order_by_clause,
+    row_cursor_value,
+)
 from api.tickets.schemas import TicketCreate, TicketUpdate
+
+
+@dataclass(frozen=True)
+class TicketFilters:
+    """Фильтры списка заявок (значения enum — уже строки)."""
+
+    status: str | None = None
+    type: str | None = None
+    priority: str | None = None
+    channel: str | None = None
+    team: str | None = None
+    assignee_id: uuid.UUID | None = None
+    requester_id: uuid.UUID | None = None
+    premises_id: uuid.UUID | None = None
+    tag: str | None = None
+    sla_breached: bool | None = None
+
 
 # Поля, изменения которых пишутся в журнал §3.7 (см. _FIELD_ACTIONS).
 _AUDITED_FIELDS = ("status", "priority", "type", "team", "tags")
@@ -86,6 +113,76 @@ class TicketRepository:
         stmt = select(Ticket).where(Ticket.id == ticket_id, visibility_filter(principal))
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+    def _list_conditions(
+        self, principal: Principal, filters: TicketFilters
+    ) -> list[ColumnElement[bool]]:
+        """Видимость (NFR-1.2) + фильтры — всё в SQL."""
+        conditions: list[ColumnElement[bool]] = [visibility_filter(principal)]
+        if filters.status is not None:
+            conditions.append(Ticket.status == filters.status)
+        if filters.type is not None:
+            conditions.append(Ticket.type == filters.type)
+        if filters.priority is not None:
+            conditions.append(Ticket.priority == filters.priority)
+        if filters.channel is not None:
+            conditions.append(Ticket.channel == filters.channel)
+        if filters.team is not None:
+            conditions.append(Ticket.team == filters.team)
+        if filters.assignee_id is not None:
+            conditions.append(Ticket.assignee_id == filters.assignee_id)
+        if filters.requester_id is not None:
+            conditions.append(Ticket.requester_id == filters.requester_id)
+        if filters.premises_id is not None:
+            conditions.append(Ticket.premises_id == filters.premises_id)
+        if filters.tag is not None:
+            # tag = ANY(tags) — заявка содержит указанный тег.
+            conditions.append(Ticket.tags.any(literal(filters.tag)))
+        if filters.sla_breached is not None:
+            now = datetime.datetime.now(datetime.UTC)
+            if filters.sla_breached:
+                conditions.append(
+                    and_(Ticket.resolution_due_at.is_not(None), Ticket.resolution_due_at < now)
+                )
+            else:
+                conditions.append(
+                    or_(Ticket.resolution_due_at.is_(None), Ticket.resolution_due_at >= now)
+                )
+        return conditions
+
+    async def list_tickets(
+        self,
+        principal: Principal,
+        *,
+        filters: TicketFilters,
+        sort: str | None,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[Ticket], str | None, bool]:
+        """Список видимых заявок с фильтрами, сортировкой и keyset-пагинацией.
+
+        Возвращает (строки, next_cursor, has_more). Невалидный cursor → ValueError.
+        """
+        spec: SortSpec = get_sort_spec(sort)
+        conditions = self._list_conditions(principal, filters)
+        if cursor is not None:
+            value, cursor_id = decode_cursor(cursor)
+            conditions.append(keyset_predicate(spec, value, cursor_id))
+        stmt = (
+            select(Ticket)
+            .where(and_(*conditions))
+            .order_by(*order_by_clause(spec))
+            .limit(limit + 1)
+        )
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = (
+            encode_cursor(row_cursor_value(rows[-1], spec), rows[-1].id)
+            if has_more and rows
+            else None
+        )
+        return rows, next_cursor, has_more
 
     async def apply_update(
         self, ticket: Ticket, payload: TicketUpdate, principal: Principal

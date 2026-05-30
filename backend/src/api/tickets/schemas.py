@@ -14,7 +14,7 @@ import datetime
 import uuid
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from api.tickets.enums import (
     AccessLevel,
@@ -62,6 +62,52 @@ class TicketUpdate(BaseModel):
     team: TicketTeam | None = None
     tags: list[str] | None = None
     custom_fields: dict[str, Any] | None = None
+
+
+class TicketSummaryRead(BaseModel):
+    """Краткая карточка заявки для списков (контракт `TicketSummary`)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    number: str
+    subject: str
+    status: TicketStatus
+    priority: TicketPriority
+    type: TicketType
+    channel: TicketChannel
+    requester_id: uuid.UUID
+    assignee_id: uuid.UUID | None
+    team: TicketTeam | None
+    first_response_due_at: datetime.datetime | None
+    resolution_due_at: datetime.datetime | None
+    tags: list[str]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def sla_breached(self) -> bool:
+        """Расчётное поле: нарушен ли дедлайн решения (в E1 всегда false — SLA это E4)."""
+        return (
+            self.resolution_due_at is not None
+            and self.resolution_due_at < datetime.datetime.now(datetime.UTC)
+        )
+
+
+class Pagination(BaseModel):
+    """Курсорная пагинация (контракт `Pagination`)."""
+
+    next_cursor: str | None
+    has_more: bool
+
+
+class TicketListEnvelope(BaseModel):
+    """Конверт ответа со списком кратких карточек + пагинацией."""
+
+    data: list[TicketSummaryRead]
+    pagination: Pagination
+    request_id: uuid.UUID
 
 
 class TicketRead(BaseModel):
