@@ -21,6 +21,22 @@ from api.tickets.schemas import TicketCreate, TicketUpdate
 _AUDITED_FIELDS = ("status", "priority", "type", "team", "tags")
 
 
+def apply_status_side_effects(ticket: Ticket, old_status: str) -> None:
+    """Lifecycle-эффекты смены статуса (ТЗ §3.1): счётчик переоткрытий и метки.
+
+    Общий хелпер для PATCH (#8) и action-эндпоинтов (#12).
+    """
+    if ticket.status == old_status:
+        return
+    now = datetime.datetime.now(datetime.UTC)
+    if ticket.status == TicketStatus.REOPENED.value:
+        ticket.reopened_count += 1
+    elif ticket.status == TicketStatus.RESOLVED.value:
+        ticket.resolved_at = now
+    elif ticket.status == TicketStatus.CLOSED.value:
+        ticket.closed_at = now
+
+
 class TicketRepository:
     """Репозиторий заявок поверх `AsyncSession` (commit — на стороне вызывающего)."""
 
@@ -98,22 +114,9 @@ class TicketRepository:
         if "custom_fields" in fields_set and payload.custom_fields is not None:
             ticket.custom_fields = payload.custom_fields
 
-        self._apply_status_side_effects(ticket, old_status)
+        apply_status_side_effects(ticket, old_status)
         await self._session.flush()
 
         after: dict[str, Any] = {field: getattr(ticket, field) for field in _AUDITED_FIELDS}
         await record_changes(self._history, ticket.id, principal.user_id, before, after)
         return ticket
-
-    @staticmethod
-    def _apply_status_side_effects(ticket: Ticket, old_status: str) -> None:
-        """Lifecycle-эффекты смены статуса (ТЗ §3.1): счётчик переоткрытий и метки."""
-        if ticket.status == old_status:
-            return
-        now = datetime.datetime.now(datetime.UTC)
-        if ticket.status == TicketStatus.REOPENED.value:
-            ticket.reopened_count += 1
-        elif ticket.status == TicketStatus.RESOLVED.value:
-            ticket.resolved_at = now
-        elif ticket.status == TicketStatus.CLOSED.value:
-            ticket.closed_at = now

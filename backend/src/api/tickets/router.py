@@ -13,14 +13,21 @@ from fastapi import APIRouter, Depends, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.dependencies import get_current_principal
-from api.auth.principal import Principal
+from api.auth.principal import Principal, PrincipalKind
 from api.db import get_session
 from api.errors import ProblemException
+from api.tickets.actions import TicketActionService
 from api.tickets.enums import TicketStatus
 from api.tickets.history import TicketHistoryAction, TicketHistoryRepository
 from api.tickets.messages import TicketMessageRepository, message_added_payload
+from api.tickets.models import Ticket
 from api.tickets.repository import TicketRepository
 from api.tickets.schemas import (
+    AssignInput,
+    EscalateInput,
+    RateInput,
+    ReopenInput,
+    ResolveInput,
     TicketCreate,
     TicketEnvelope,
     TicketHistoryListEnvelope,
@@ -47,6 +54,19 @@ def _authorize_update(principal: Principal, payload: TicketUpdate) -> None:
     changed_only_status = payload.model_fields_set <= _REQUESTER_ALLOWED_FIELDS
     if not changed_only_status or payload.status is not TicketStatus.CLOSED:
         raise ProblemException.forbidden(detail="Requesters may only close their own ticket")
+
+
+def _require_operator(principal: Principal) -> None:
+    """RBAC action-эндпоинтов, доступных только операторам."""
+    if not principal.is_operator:
+        raise ProblemException.forbidden(detail="Operator role required")
+
+
+def _ticket_envelope(ticket: Ticket, x_request_id: str | None) -> TicketEnvelope:
+    return TicketEnvelope(
+        data=TicketRead.model_validate(ticket),
+        request_id=_resolve_request_id(x_request_id),
+    )
 
 
 def _resolve_request_id(raw: str | None) -> uuid.UUID:
@@ -220,3 +240,123 @@ async def create_message(
         data=TicketMessageRead.model_validate(message),
         request_id=_resolve_request_id(x_request_id),
     )
+
+
+# --- Action-эндпоинты (#12): переход статуса/поле + история + RBAC ---
+
+
+@router.post("/{ticket_id}/assign", response_model=TicketEnvelope, summary="Назначить заявку")
+async def assign_ticket(
+    ticket_id: uuid.UUID,
+    payload: AssignInput,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    _require_operator(principal)
+    await TicketActionService(session).assign(
+        ticket, principal.user_id, assignee_id=payload.assignee_id, team=payload.team
+    )
+    await session.commit()
+    await session.refresh(ticket)
+    return _ticket_envelope(ticket, x_request_id)
+
+
+@router.post("/{ticket_id}/escalate", response_model=TicketEnvelope, summary="Эскалировать")
+async def escalate_ticket(
+    ticket_id: uuid.UUID,
+    payload: EscalateInput,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    _require_operator(principal)
+    await TicketActionService(session).escalate(
+        ticket, principal.user_id, team=payload.team, reason=payload.reason
+    )
+    await session.commit()
+    await session.refresh(ticket)
+    return _ticket_envelope(ticket, x_request_id)
+
+
+@router.post("/{ticket_id}/resolve", response_model=TicketEnvelope, summary="Отметить решённой")
+async def resolve_ticket(
+    ticket_id: uuid.UUID,
+    payload: ResolveInput,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    _require_operator(principal)
+    await TicketActionService(session).resolve(
+        ticket, principal.user_id, resolution_note=payload.resolution_note
+    )
+    await session.commit()
+    await session.refresh(ticket)
+    return _ticket_envelope(ticket, x_request_id)
+
+
+@router.post("/{ticket_id}/close", response_model=TicketEnvelope, summary="Закрыть заявку")
+async def close_ticket(
+    ticket_id: uuid.UUID,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    _require_operator(principal)
+    await TicketActionService(session).close(ticket, principal.user_id)
+    await session.commit()
+    await session.refresh(ticket)
+    return _ticket_envelope(ticket, x_request_id)
+
+
+@router.post("/{ticket_id}/reopen", response_model=TicketEnvelope, summary="Переоткрыть заявку")
+async def reopen_ticket(
+    ticket_id: uuid.UUID,
+    payload: ReopenInput,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    # Переоткрыть может оператор или заявитель-владелец (видимость → 404).
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    await TicketActionService(session).reopen(ticket, principal.user_id, reason=payload.reason)
+    await session.commit()
+    await session.refresh(ticket)
+    return _ticket_envelope(ticket, x_request_id)
+
+
+@router.post("/{ticket_id}/rate", response_model=TicketEnvelope, summary="Оценка заявителя")
+async def rate_ticket(
+    ticket_id: uuid.UUID,
+    payload: RateInput,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    # Оценку ставит только заявитель (не оператор).
+    if principal.kind is not PrincipalKind.REQUESTER:
+        raise ProblemException.forbidden(detail="Only the requester may rate a ticket")
+    await TicketActionService(session).rate(
+        ticket, principal.user_id, rating=payload.rating, comment=payload.comment
+    )
+    await session.commit()
+    await session.refresh(ticket)
+    return _ticket_envelope(ticket, x_request_id)

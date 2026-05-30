@@ -144,6 +144,49 @@ class TicketHistoryListEnvelope(BaseModel):
     request_id: uuid.UUID
 
 
+class AssignInput(BaseModel):
+    """Тело POST /tickets/{id}/assign."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    assignee_id: uuid.UUID
+    team: TicketTeam | None = None
+
+
+class EscalateInput(BaseModel):
+    """Тело POST /tickets/{id}/escalate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    team: TicketTeam | None = None
+    reason: str | None = None
+
+
+class ResolveInput(BaseModel):
+    """Тело POST /tickets/{id}/resolve."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resolution_note: str | None = None
+
+
+class ReopenInput(BaseModel):
+    """Тело POST /tickets/{id}/reopen."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = None
+
+
+class RateInput(BaseModel):
+    """Тело POST /tickets/{id}/rate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rating: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=2000)
+
+
 class TicketMessageCreate(BaseModel):
     """Тело POST /tickets/{id}/messages (контракт `TicketMessageCreate`).
 

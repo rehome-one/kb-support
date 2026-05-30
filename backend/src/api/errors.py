@@ -63,6 +63,15 @@ class ProblemException(Exception):
         )
 
     @classmethod
+    def conflict(cls, detail: str | None = None) -> ProblemException:
+        return cls(
+            status=409,
+            title="Conflict",
+            type_=f"{_ERROR_BASE}/conflict",
+            detail=detail,
+        )
+
+    @classmethod
     def unprocessable(cls, detail: str | None = None) -> ProblemException:
         return cls(
             status=422,

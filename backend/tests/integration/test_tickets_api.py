@@ -405,6 +405,165 @@ def test_messages_unauthenticated_returns_401(client: TestClient) -> None:
     assert _post_message(client, str(uuid.uuid4()), "x").status_code == 401
 
 
+# --- Actions (#12) ---
+
+
+def _action(client: TestClient, ticket_id: str, action: str, **body: object) -> Response:
+    return client.post(f"/api/v1/support/tickets/{ticket_id}/{action}", json=body)
+
+
+def _history_actions(client: TestClient, ticket_id: str) -> list[str]:
+    return [
+        h["action"]
+        for h in client.get(f"/api/v1/support/tickets/{ticket_id}/history").json()["data"]
+    ]
+
+
+def test_assign_by_operator(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    assignee = uuid.uuid4()
+    resp = _action(client, ticket_id, "assign", assignee_id=str(assignee), team="legal")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["assignee_id"] == str(assignee)
+    assert resp.json()["data"]["team"] == "legal"
+    assert "reassigned" in _history_actions(client, ticket_id)
+
+
+def test_requester_cannot_assign(client: TestClient) -> None:
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    assert _action(client, ticket_id, "assign", assignee_id=str(uuid.uuid4())).status_code == 403
+
+
+def test_escalate_from_open(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, TicketStatus.OPEN.value)
+    resp = _action(client, ticket_id, "escalate", reason="need L2", team="legal")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "ESCALATED"
+    assert resp.json()["data"]["team"] == "legal"
+    assert "status_changed" in _history_actions(client, ticket_id)
+
+
+def test_escalate_from_new_is_conflict(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]  # NEW
+    assert _action(client, ticket_id, "escalate").status_code == 409
+
+
+def test_requester_cannot_escalate(client: TestClient) -> None:
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    assert _action(client, ticket_id, "escalate").status_code == 403
+
+
+def test_resolve_action_sets_resolved_at(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, TicketStatus.OPEN.value)
+    resp = _action(client, ticket_id, "resolve", resolution_note="fixed")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "RESOLVED"
+    assert resp.json()["data"]["resolved_at"] is not None
+
+
+def test_close_from_resolved(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, TicketStatus.RESOLVED.value)
+    resp = _action(client, ticket_id, "close")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "CLOSED"
+    assert resp.json()["data"]["closed_at"] is not None
+
+
+def test_close_from_open_is_conflict(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, TicketStatus.OPEN.value)
+    assert _action(client, ticket_id, "close").status_code == 409
+
+
+def test_requester_cannot_close(client: TestClient) -> None:
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, TicketStatus.RESOLVED.value)
+    assert _action(client, ticket_id, "close").status_code == 403
+
+
+def test_reopen_by_operator_increments_counter(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, TicketStatus.CLOSED.value)
+    resp = _action(client, ticket_id, "reopen", reason="not fixed")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "REOPENED"
+    assert resp.json()["data"]["reopened_count"] == 1
+
+
+def test_requester_can_reopen_own_ticket(client: TestClient) -> None:
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, TicketStatus.RESOLVED.value)
+    resp = _action(client, ticket_id, "reopen")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "REOPENED"
+
+
+def test_rate_by_requester_on_closed(client: TestClient) -> None:
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_team(ticket_id, TicketTeam.SUPPORT.value)
+    _set_status(ticket_id, TicketStatus.CLOSED.value)
+    resp = _action(client, ticket_id, "rate", rating=5, comment="great")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["rating"] == 5
+    # Журнал читает оператор (заявителю /history недоступен — NFR-1.3/§3.7).
+    _use(_operator())
+    assert "rated" in _history_actions(client, ticket_id)
+
+
+def test_operator_cannot_rate(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, TicketStatus.CLOSED.value)
+    assert _action(client, ticket_id, "rate", rating=4).status_code == 403
+
+
+def test_rate_on_open_is_unprocessable(client: TestClient) -> None:
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]  # NEW
+    _set_status(ticket_id, TicketStatus.OPEN.value)
+    assert _action(client, ticket_id, "rate", rating=4).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("action", "body"),
+    [
+        ("assign", {"assignee_id": "00000000-0000-0000-0000-000000000001"}),
+        ("escalate", {}),
+        ("resolve", {}),
+        ("close", {}),
+        ("reopen", {}),
+        ("rate", {"rating": 4}),
+    ],
+)
+def test_action_not_found_for_non_owner(
+    client: TestClient, action: str, body: dict[str, object]
+) -> None:
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    resp = client.post(f"/api/v1/support/tickets/{ticket_id}/{action}", json=body)
+    assert resp.status_code == 404
+
+
+def test_action_unauthenticated_returns_401(client: TestClient) -> None:
+    assert _action(client, str(uuid.uuid4()), "close").status_code == 401
+
+
 def test_create_returns_201_with_defaults(client: TestClient) -> None:
     user = uuid.uuid4()
     _use(Principal(user_id=user, kind=PrincipalKind.REQUESTER))
