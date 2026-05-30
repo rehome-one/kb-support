@@ -37,6 +37,23 @@ jobs:
           fi
 
   # ============================================================
+  # AT-001 — архитектурная константа
+  # Запрещены: импорты из rehome-kb-platform и прямые SQL к чужим
+  # таблицам. См. CLAUDE.md правило 7 и ADR-0005 Решение 1.
+  # ============================================================
+  arch-constraint:
+    name: Architectural constraint (AT-001)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run check-arch-constraint.sh
+        run: bash scripts/check-arch-constraint.sh
+
+      - name: Run self-tests (fixtures)
+        run: bash tests/arch-constraint/test_runner.sh
+
+  # ============================================================
   # Anti-crutches: TODO/FIXME/HACK без тикета в коде
   # ============================================================
   anti-crutches:

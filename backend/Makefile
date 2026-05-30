@@ -1,6 +1,6 @@
 # Makefile для kb-support backend. Все цели запускаются из директории backend/.
 .PHONY: help install lint format typecheck test test-cov dev docker-build clean \
-        db-up db-down db-logs migrate migrate-down revision
+        db-up db-down db-logs migrate migrate-down revision arch-check
 
 PYTHON ?= python3
 VENV   ?= .venv
@@ -66,3 +66,11 @@ migrate-down: ## Откатить одну миграцию
 revision: ## Создать новую миграцию: make revision m="add tickets"
 	@if [ -z "$$m" ]; then echo "Usage: make revision m=\"<message>\""; exit 1; fi
 	$(PYBIN)/alembic revision --autogenerate -m "$$m"
+
+# ---------------------------------------------------------------------------
+# Architecture
+# ---------------------------------------------------------------------------
+
+arch-check: ## AT-001 — проверка архитектурной константы (см. CLAUDE.md правило 7)
+	@bash ../scripts/check-arch-constraint.sh
+	@bash ../tests/arch-constraint/test_runner.sh
