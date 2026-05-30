@@ -189,3 +189,43 @@ Allowlist: inline-комментарий `# arch-allow: <обоснование 
 - **2026-05-30** — bootstrap repo `rehome-one/kb-support`, Phase 0
   baseline создан. Handoff: ТЗ v2.2 + OpenAPI v1.1 + ADR-0005.
   Reference-копии ADR-0001/0003/0004 из kb-platform.
+
+## CS.1 — E1 «Ядро заявок» завершён (2026-05-31)
+
+Backend-ядро службы поддержки реализовано и смержено через двухагентное ревью
+(Developer + Reviewer + Architect). Архитектура — `docs/architecture.md`.
+
+**Сделано (PR #24–#38).**
+
+| Область | Задача | PR |
+|---|---|---|
+| Инфра | backend skeleton; DB foundation; AT-001 CI арх-константа | #24/#25/#26 |
+| Ticket | ORM-модель + миграция | #27 (#5) |
+| Ticket | POST + GET + storage-level access (NFR-1.2) | #30 (#6) |
+| Ticket | list + cursor-пагинация + фильтры | #35 (#7) |
+| Ticket | PATCH + машина состояний + журнал | #32 (#8) |
+| Ticket | TicketHistory (неизменяемый аудит, §3.7) | #31 (#9) |
+| Ticket | TicketMessage + is_internal (NFR-1.3) | #33 (#10) |
+| Ticket | actions assign/escalate/resolve/close/reopen/rate | #34 (#12) |
+| Контракт | production `docs/openapi.yaml` (3.1-strict) | #36 (#11) |
+| Контракт | AT-002 контрактные тесты (drift-детекция) | #37 (#4) |
+| Observability | JSON-логи + mask_pii + request_id + readyz + Prometheus | #38 (#13) |
+| Docs | architecture.md + CS.1 | этот PR (#14) |
+
+**Тестовое покрытие.** ~99% (бизнес-логика 100%). DB-тесты против Postgres (CI
+service / локально `POSTGRES_AVAILABLE=1`). Security-тесты: NFR-1.2 (A не видит B),
+NFR-1.3 (internal-заметки скрыты), anti-spoofing, anti-enumeration (404).
+
+**Ключевые решения Архитектора.** Домен enum по контракту (не по тексту Issue);
+хранение enum как String (не нативный PG ENUM); auth «вариант A» (seam в #6,
+реальная Keycloak-валидация — #29); 422 для запрещённого перехода PATCH, 409 для
+actions (per-endpoint контракт); E10 open-questions (§8.1) — приняты рекомендации ТЗ.
+
+**Закрытый техдолг.** TD-RBT-001 (AT-001 CI), TD-OAS-001 (production OpenAPI).
+
+**Открытый backlog / follow-up.** #29 (Keycloak JWT, до E2); #28 (lowercase-SQL в
+AT-001); спека-полнота (`/history`·`/readyz`·`/metrics` вне OpenAPI; 409-проза
+PATCH); индекс под пагинацию (E4); cleanup-воркер истории 5 лет (E8); метрика
+низких оценок (E9); триаж неназначенной очереди (`team=null`); actor_sub binding (#29).
+
+**Дальше.** E2 — рабочее место оператора (Next.js, SSO) — требует #29 (auth).
