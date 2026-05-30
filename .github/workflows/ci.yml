@@ -65,6 +65,26 @@ jobs:
   backend:
     name: Backend (Python)
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: kbsupport
+          POSTGRES_USER: kbsupport
+          POSTGRES_PASSWORD: devpass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kbsupport -d kbsupport"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      KBS_DATABASE_URL: postgresql+asyncpg://kbsupport:devpass@localhost:5432/kbsupport
+      CI: "true"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -100,6 +120,11 @@ jobs:
         if: steps.check.outputs.exists == 'true'
         working-directory: backend
         run: mypy --strict src tests
+
+      - name: Alembic upgrade head
+        if: steps.check.outputs.exists == 'true'
+        working-directory: backend
+        run: alembic upgrade head
 
       - name: Pytest + coverage
         if: steps.check.outputs.exists == 'true'

@@ -1,5 +1,6 @@
 # Makefile для kb-support backend. Все цели запускаются из директории backend/.
-.PHONY: help install lint format typecheck test test-cov dev docker-build clean
+.PHONY: help install lint format typecheck test test-cov dev docker-build clean \
+        db-up db-down db-logs migrate migrate-down revision
 
 PYTHON ?= python3
 VENV   ?= .venv
@@ -42,3 +43,26 @@ docker-build: ## Собрать Docker-образ
 clean: ## Удалить кеши и venv
 	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache .coverage coverage.xml htmlcov
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Database
+# ---------------------------------------------------------------------------
+
+db-up: ## Поднять Postgres (docker compose)
+	docker compose up -d postgres
+
+db-down: ## Остановить Postgres (volume сохраняется)
+	docker compose stop postgres
+
+db-logs: ## Логи Postgres
+	docker compose logs -f postgres
+
+migrate: ## Применить миграции до head
+	$(PYBIN)/alembic upgrade head
+
+migrate-down: ## Откатить одну миграцию
+	$(PYBIN)/alembic downgrade -1
+
+revision: ## Создать новую миграцию: make revision m="add tickets"
+	@if [ -z "$$m" ]; then echo "Usage: make revision m=\"<message>\""; exit 1; fi
+	$(PYBIN)/alembic revision --autogenerate -m "$$m"
