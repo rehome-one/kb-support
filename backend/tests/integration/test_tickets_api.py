@@ -9,6 +9,7 @@ JWT/сессионная валидация в #29). Заявки коммитя
 from __future__ import annotations
 
 import asyncio
+import itertools
 import os
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -25,10 +26,11 @@ from api.auth.principal import Principal, PrincipalKind
 from api.config import get_settings
 from api.db import get_session
 from api.main import app
-from api.tickets.enums import TicketTeam, TicketType
+from api.tickets.enums import TicketStatus, TicketTeam, TicketType
 from api.tickets.history import TicketHistoryRepository, record_changes
 from api.tickets.repository import TicketRepository
 from api.tickets.schemas import TicketCreate
+from api.tickets.state_machine import ALLOWED_TRANSITIONS
 
 pytestmark = pytest.mark.skipif(
     "CI" not in os.environ and "POSTGRES_AVAILABLE" not in os.environ,
@@ -89,6 +91,199 @@ def _set_team(ticket_id: str, team_value: str) -> None:
             await engine.dispose()
 
     asyncio.run(_inner())
+
+
+def _set_status(ticket_id: str, status_value: str) -> None:
+    """Выставить статус заявке напрямую в БД (подготовка стартового состояния)."""
+
+    async def _inner() -> None:
+        engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("UPDATE tickets SET status = :s WHERE id = :id"),
+                    {"s": status_value, "id": uuid.UUID(ticket_id)},
+                )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_inner())
+
+
+_STATUS_PAIRS = [(a, b) for a, b in itertools.product(TicketStatus, repeat=2) if a != b]
+
+
+@pytest.mark.parametrize(("source", "target"), _STATUS_PAIRS)
+def test_status_transition_enforced(
+    client: TestClient, source: TicketStatus, target: TicketStatus
+) -> None:
+    """DoD #8: разрешённый переход → 200; запрещённый → 422 (по каждой паре)."""
+    operator = uuid.uuid4()
+    _use(
+        Principal(
+            user_id=operator,
+            kind=PrincipalKind.OPERATOR,
+            teams=frozenset({TicketTeam.SUPPORT}),
+        )
+    )
+    ticket_id = _create(client).json()["data"]["id"]  # owner=operator, статус NEW
+    _set_status(ticket_id, source.value)
+    resp = client.patch(f"/api/v1/support/tickets/{ticket_id}", json={"status": target.value})
+    if target in ALLOWED_TRANSITIONS.get(source, frozenset()):
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["status"] == target.value
+    else:
+        assert resp.status_code == 422, resp.text
+
+
+def test_patch_status_change_records_history(client: TestClient) -> None:
+    operator = uuid.uuid4()
+    _use(
+        Principal(
+            user_id=operator,
+            kind=PrincipalKind.OPERATOR,
+            teams=frozenset({TicketTeam.SUPPORT}),
+        )
+    )
+    ticket_id = _create(client).json()["data"]["id"]  # NEW
+    assert (
+        client.patch(f"/api/v1/support/tickets/{ticket_id}", json={"status": "OPEN"}).status_code
+        == 200
+    )
+    actions = [
+        row["action"]
+        for row in client.get(f"/api/v1/support/tickets/{ticket_id}/history").json()["data"]
+    ]
+    assert "created" in actions
+    assert "status_changed" in actions
+
+
+def test_patch_priority_records_history(client: TestClient) -> None:
+    operator = uuid.uuid4()
+    _use(
+        Principal(
+            user_id=operator,
+            kind=PrincipalKind.OPERATOR,
+            teams=frozenset({TicketTeam.SUPPORT}),
+        )
+    )
+    ticket_id = _create(client).json()["data"]["id"]
+    client.patch(f"/api/v1/support/tickets/{ticket_id}", json={"priority": "high"})
+    actions = [
+        row["action"]
+        for row in client.get(f"/api/v1/support/tickets/{ticket_id}/history").json()["data"]
+    ]
+    assert "priority_changed" in actions
+
+
+def test_patch_multiple_fields_applies_and_audits(client: TestClient) -> None:
+    operator = uuid.uuid4()
+    _use(
+        Principal(
+            user_id=operator,
+            kind=PrincipalKind.OPERATOR,
+            teams=frozenset({TicketTeam.SUPPORT}),
+        )
+    )
+    ticket_id = _create(client).json()["data"]["id"]
+    resp = client.patch(
+        f"/api/v1/support/tickets/{ticket_id}",
+        json={
+            "subject": "Уточнённая тема",
+            "type": "MAINTENANCE",
+            "team": "legal",
+            "tags": ["urgent", "vip"],
+            "custom_fields": {"floor": 3},
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["subject"] == "Уточнённая тема"
+    assert data["type"] == "MAINTENANCE"
+    assert data["team"] == "legal"
+    assert data["tags"] == ["urgent", "vip"]
+    assert data["custom_fields"] == {"floor": 3}
+    actions = [
+        row["action"]
+        for row in client.get(f"/api/v1/support/tickets/{ticket_id}/history").json()["data"]
+    ]
+    assert {"type_changed", "team_changed", "tags_updated"} <= set(actions)
+
+
+def test_reopen_increments_counter(client: TestClient) -> None:
+    operator = uuid.uuid4()
+    _use(
+        Principal(
+            user_id=operator,
+            kind=PrincipalKind.OPERATOR,
+            teams=frozenset({TicketTeam.SUPPORT}),
+        )
+    )
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, TicketStatus.CLOSED.value)
+    resp = client.patch(f"/api/v1/support/tickets/{ticket_id}", json={"status": "REOPENED"})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["reopened_count"] == 1
+
+
+def test_resolve_sets_resolved_at(client: TestClient) -> None:
+    operator = uuid.uuid4()
+    _use(
+        Principal(
+            user_id=operator,
+            kind=PrincipalKind.OPERATOR,
+            teams=frozenset({TicketTeam.SUPPORT}),
+        )
+    )
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, TicketStatus.OPEN.value)
+    resp = client.patch(f"/api/v1/support/tickets/{ticket_id}", json={"status": "RESOLVED"})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["resolved_at"] is not None
+
+
+def test_requester_can_close_own_ticket(client: TestClient) -> None:
+    user = uuid.uuid4()
+    _use(Principal(user_id=user, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]  # NEW, владелец user
+    resp = client.patch(f"/api/v1/support/tickets/{ticket_id}", json={"status": "CLOSED"})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "CLOSED"
+
+
+def test_requester_cannot_change_priority(client: TestClient) -> None:
+    user = uuid.uuid4()
+    _use(Principal(user_id=user, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    resp = client.patch(f"/api/v1/support/tickets/{ticket_id}", json={"priority": "high"})
+    assert resp.status_code == 403
+
+
+def test_requester_cannot_set_non_closed_status(client: TestClient) -> None:
+    user = uuid.uuid4()
+    _use(Principal(user_id=user, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    resp = client.patch(f"/api/v1/support/tickets/{ticket_id}", json={"status": "OPEN"})
+    assert resp.status_code == 403
+
+
+def test_operator_cannot_patch_foreign_ticket(client: TestClient) -> None:
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]  # team=None
+    _use(
+        Principal(
+            user_id=uuid.uuid4(),
+            kind=PrincipalKind.OPERATOR,
+            teams=frozenset({TicketTeam.LEGAL}),
+        )
+    )
+    resp = client.patch(f"/api/v1/support/tickets/{ticket_id}", json={"status": "OPEN"})
+    assert resp.status_code == 404
+
+
+def test_patch_without_auth_returns_401(client: TestClient) -> None:
+    resp = client.patch(f"/api/v1/support/tickets/{uuid.uuid4()}", json={"status": "OPEN"})
+    assert resp.status_code == 401
 
 
 def test_create_returns_201_with_defaults(client: TestClient) -> None:

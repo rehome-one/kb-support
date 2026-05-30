@@ -32,6 +32,8 @@ class TicketHistoryAction(str, enum.Enum):
     STATUS_CHANGED = "status_changed"
     REASSIGNED = "reassigned"
     PRIORITY_CHANGED = "priority_changed"
+    TYPE_CHANGED = "type_changed"
+    TEAM_CHANGED = "team_changed"
     TAGS_UPDATED = "tags_updated"
     MESSAGE_ADDED = "message_added"
 
@@ -125,11 +127,14 @@ def _to_jsonable(value: Any) -> Any:
     return value
 
 
-# Поле заявки → действие журнала при его изменении (расширяется в #8 PATCH).
+# Поле заявки → действие журнала при его изменении.
+# assignee_id → reassigned триггерится из /assign (#12), не из PATCH.
 _FIELD_ACTIONS: dict[str, TicketHistoryAction] = {
     "status": TicketHistoryAction.STATUS_CHANGED,
     "assignee_id": TicketHistoryAction.REASSIGNED,
     "priority": TicketHistoryAction.PRIORITY_CHANGED,
+    "type": TicketHistoryAction.TYPE_CHANGED,
+    "team": TicketHistoryAction.TEAM_CHANGED,
     "tags": TicketHistoryAction.TAGS_UPDATED,
 }
 

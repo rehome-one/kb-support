@@ -45,6 +45,24 @@ class TicketCreate(BaseModel):
     custom_fields: dict[str, Any] | None = None
 
 
+class TicketUpdate(BaseModel):
+    """Тело PATCH /tickets/{id} — частичное обновление (контракт `TicketUpdate`).
+
+    `assignee_id` отсутствует намеренно — назначение через `POST /tickets/{id}/assign`
+    (#12), не через PATCH. Лишние поля запрещены.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    subject: str | None = Field(default=None, min_length=1, max_length=300)
+    status: TicketStatus | None = None
+    priority: TicketPriority | None = None
+    type: TicketType | None = None
+    team: TicketTeam | None = None
+    tags: list[str] | None = None
+    custom_fields: dict[str, Any] | None = None
+
+
 class TicketRead(BaseModel):
     """Представление заявки в ответе (контракт `Ticket`)."""
 
