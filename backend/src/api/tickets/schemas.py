@@ -102,3 +102,24 @@ class TicketEnvelope(BaseModel):
 
     data: TicketRead
     request_id: uuid.UUID
+
+
+class TicketHistoryRead(BaseModel):
+    """Строка журнала действий по заявке (ТЗ §3.7)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    ticket_id: uuid.UUID
+    actor_id: uuid.UUID
+    action: str
+    from_value: dict[str, Any] | None
+    to_value: dict[str, Any] | None
+    created_at: datetime.datetime
+
+
+class TicketHistoryListEnvelope(BaseModel):
+    """Конверт ответа со списком строк журнала."""
+
+    data: list[TicketHistoryRead]
+    request_id: uuid.UUID

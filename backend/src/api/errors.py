@@ -45,6 +45,15 @@ class ProblemException(Exception):
         )
 
     @classmethod
+    def forbidden(cls, detail: str | None = None) -> ProblemException:
+        return cls(
+            status=403,
+            title="Forbidden",
+            type_=f"{_ERROR_BASE}/forbidden",
+            detail=detail,
+        )
+
+    @classmethod
     def not_found(cls, detail: str | None = None) -> ProblemException:
         return cls(
             status=404,

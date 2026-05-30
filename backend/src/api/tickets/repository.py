@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth.principal import Principal
 from api.tickets.access import visibility_filter
 from api.tickets.enums import AccessLevel, TicketChannel, TicketPriority, TicketStatus
+from api.tickets.history import TicketHistoryAction, TicketHistoryRepository
 from api.tickets.models import Ticket
 from api.tickets.numbering import generate_ticket_number
 from api.tickets.schemas import TicketCreate
@@ -20,6 +21,7 @@ class TicketRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._history = TicketHistoryRepository(session)
 
     async def create(self, payload: TicketCreate, principal: Principal) -> Ticket:
         """Создать заявку.
@@ -48,6 +50,14 @@ class TicketRepository:
         )
         self._session.add(ticket)
         await self._session.flush()
+        # ФЗ-152 / §3.7: первая запись журнала — создание. actor = принципал
+        # (для оператора-от-имени-заявителя actor — оператор, requester_id — заявитель).
+        await self._history.record(
+            ticket.id,
+            principal.user_id,
+            TicketHistoryAction.CREATED,
+            to_value={"status": ticket.status},
+        )
         return ticket
 
     async def get_for_principal(self, ticket_id: uuid.UUID, principal: Principal) -> Ticket | None:

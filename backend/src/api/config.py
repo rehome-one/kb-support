@@ -40,6 +40,15 @@ class Settings(BaseSettings):
         default=False,
         description="SQLAlchemy echo для debug. В production — всегда False.",
     )
+    history_retention_days: int = Field(
+        default=1825,
+        ge=1,
+        description=(
+            "Срок хранения TicketHistory (NFR-1.4 — 5 лет = 1825 дней). "
+            "Фактический cleanup-воркер — отдельный Issue в E8; здесь только "
+            "конфигурируемая политика."
+        ),
+    )
 
 
 @lru_cache(maxsize=1)

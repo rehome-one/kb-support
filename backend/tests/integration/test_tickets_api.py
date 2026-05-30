@@ -25,7 +25,10 @@ from api.auth.principal import Principal, PrincipalKind
 from api.config import get_settings
 from api.db import get_session
 from api.main import app
-from api.tickets.enums import TicketTeam
+from api.tickets.enums import TicketTeam, TicketType
+from api.tickets.history import TicketHistoryRepository, record_changes
+from api.tickets.repository import TicketRepository
+from api.tickets.schemas import TicketCreate
 
 pytestmark = pytest.mark.skipif(
     "CI" not in os.environ and "POSTGRES_AVAILABLE" not in os.environ,
@@ -171,6 +174,80 @@ def test_invalid_request_id_header_falls_back_to_generated(client: TestClient) -
     assert resp.status_code == 201
     # Невалидный заголовок → сгенерированный валидный uuid (парсится без ошибки).
     uuid.UUID(resp.json()["request_id"])
+
+
+def test_create_writes_created_history_visible_to_operator(client: TestClient) -> None:
+    """DoD #9: создание пишет первую строку journal (action=created)."""
+    operator = uuid.uuid4()
+    _use(
+        Principal(
+            user_id=operator,
+            kind=PrincipalKind.OPERATOR,
+            teams=frozenset({TicketTeam.SUPPORT}),
+        )
+    )
+    ticket_id = _create(client).json()["data"]["id"]  # requester_id == operator (owner)
+    resp = client.get(f"/api/v1/support/tickets/{ticket_id}/history")
+    assert resp.status_code == 200
+    rows = resp.json()["data"]
+    assert any(r["action"] == "created" for r in rows)
+    assert rows[0]["actor_id"] == str(operator)
+
+
+def test_history_forbidden_for_requester(client: TestClient) -> None:
+    """Журнал — внутренние данные (§3.7): заявителю-владельцу → 403."""
+    user = uuid.uuid4()
+    _use(Principal(user_id=user, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    resp = client.get(f"/api/v1/support/tickets/{ticket_id}/history")
+    assert resp.status_code == 403
+    assert resp.headers["content-type"].startswith("application/problem+json")
+
+
+def test_history_not_found_for_non_owner(client: TestClient) -> None:
+    """Чужая заявка → 404 (anti-enumeration) до проверки оператор/нет."""
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    _use(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER))
+    resp = client.get(f"/api/v1/support/tickets/{ticket_id}/history")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_record_changes_persists_status_and_reassign() -> None:
+    """DoD #9: механизм auto-record пишет status_changed/reassigned (persist)."""
+    engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with factory() as session:
+            actor = uuid.uuid4()
+            ticket = await TicketRepository(session).create(
+                TicketCreate(subject="x", type=TicketType.PAYMENT),
+                Principal(
+                    user_id=actor,
+                    kind=PrincipalKind.OPERATOR,
+                    teams=frozenset({TicketTeam.SUPPORT}),
+                ),
+            )
+            await session.commit()
+            history = TicketHistoryRepository(session)
+            await record_changes(
+                history,
+                ticket.id,
+                actor,
+                {"status": "NEW", "assignee_id": None},
+                {"status": "OPEN", "assignee_id": str(uuid.uuid4())},
+            )
+            await session.commit()
+            rows = await history.list_for_ticket(ticket.id)
+            actions = [r.action for r in rows]
+            assert "created" in actions
+            assert "status_changed" in actions
+            assert "reassigned" in actions
+            # Порядок DESC по created_at (новые сверху).
+            assert rows[0].created_at >= rows[-1].created_at
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
