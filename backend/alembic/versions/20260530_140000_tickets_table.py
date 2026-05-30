@@ -92,9 +92,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_tickets_requester_id", "tickets", ["requester_id"])
     op.create_index("ix_tickets_assignee_id", "tickets", ["assignee_id"])
-    op.create_index(
-        "ix_tickets_status_created_at", "tickets", ["status", "created_at"]
-    )
+    op.create_index("ix_tickets_status_created_at", "tickets", ["status", "created_at"])
 
 
 def downgrade() -> None:
