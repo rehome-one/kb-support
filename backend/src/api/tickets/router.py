@@ -16,8 +16,15 @@ from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal
 from api.db import get_session
 from api.errors import ProblemException
+from api.tickets.history import TicketHistoryRepository
 from api.tickets.repository import TicketRepository
-from api.tickets.schemas import TicketCreate, TicketEnvelope, TicketRead
+from api.tickets.schemas import (
+    TicketCreate,
+    TicketEnvelope,
+    TicketHistoryListEnvelope,
+    TicketHistoryRead,
+    TicketRead,
+)
 
 router = APIRouter(prefix="/api/v1/support/tickets", tags=["Tickets"])
 
@@ -69,5 +76,30 @@ async def get_ticket(
         raise ProblemException.not_found(detail="Ticket not found")
     return TicketEnvelope(
         data=TicketRead.model_validate(ticket),
+        request_id=_resolve_request_id(x_request_id),
+    )
+
+
+@router.get(
+    "/{ticket_id}/history",
+    response_model=TicketHistoryListEnvelope,
+    summary="Журнал действий по заявке (внутренний)",
+)
+async def get_ticket_history(
+    ticket_id: uuid.UUID,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketHistoryListEnvelope:
+    # Сначала видимость самой заявки (404 для чужой/несуществующей —
+    # anti-enumeration), затем — журнал только операторам (внутренние данные §3.7).
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    if not principal.is_operator:
+        raise ProblemException.forbidden(detail="Ticket history is available to operators only")
+    rows = await TicketHistoryRepository(session).list_for_ticket(ticket_id)
+    return TicketHistoryListEnvelope(
+        data=[TicketHistoryRead.model_validate(row) for row in rows],
         request_id=_resolve_request_id(x_request_id),
     )
