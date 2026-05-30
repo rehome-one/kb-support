@@ -76,6 +76,27 @@ RUN_PRISM_CONTRACT=1 POSTGRES_AVAILABLE=1 KBS_DATABASE_URL=... \
 (AT-002)»); Prism-тест там скипается (env не выставлен), jsonschema drift-детектор
 работает на сервисном Postgres.
 
+## Аутентификация (Keycloak Bearer JWT, #29)
+
+`get_current_principal` верифицирует Bearer JWT (RS256) против JWKS Keycloak.
+Если `KBS_AUTH_JWKS_URL` пуст — auth не сконфигурирован, все запросы → 401
+(fail-closed). CookieAuth (браузерная сессия) — в E2.
+
+Env (`KBS_AUTH_*`): `JWKS_URL`, `ISSUER`, `AUDIENCE`, `ALGORITHMS` (по умолч. RS256),
+`LEEWAY`, `JWKS_CACHE_TTL`.
+
+Маппинг клеймов токена в `Principal` (настроить protocol-mappers в Keycloak):
+
+| Claim | → Principal |
+|---|---|
+| `sub` (UUID) | `user_id` |
+| `kbs_kind` (`requester`/`operator`/`service`, по умолч. requester) | `kind` |
+| `kbs_teams` (list, валидные `support`/`legal`/`finance`) | `teams` |
+| `scope` (OAuth, через пробел) | `scopes` |
+
+Любая ошибка верификации (подпись/`iss`/`aud`/`exp`/`kid`/формат/`sub`) → 401.
+JWKS кешируется (TTL) с ротацией по `kid`.
+
 ## Структура
 
 ```
