@@ -1,0 +1,1683 @@
+openapi: 3.1.0
+info:
+  title: reHome Support Module API (kb-support)
+  version: 1.0.0
+  description: 'API модуля службы поддержки reHome. Приём, обработка и сопровождение обращений пользователей силами операторов.
+    Первая линия — AI-чат kb-search, эскалации приходят сюда.
+
+
+    Архитектурные решения зафиксированы в ADR-0005:
+
+    - Данные User/Booking/Premises/Collaborator — через API основной платформы
+
+    - Ticket и ServiceOrder — разные сущности, связь по ссылке
+
+    - Email — свой IMAP-парсер в контуре РФ
+
+    - Уведомления: email + push + AI-чат + SMS (Exolve)
+
+    - access_level на уровне хранилища, scope из JWT (ADR-0003)
+
+
+    Стиль совпадает с основным API базы знаний: cursor-пагинация, RFC 7807 для ошибок, hybrid auth (m2m Bearer + browser cookie).'
+  contact:
+    name: ООО «РЕХОМ»
+servers:
+- url: https://api.rehome.one
+  description: Production
+- url: https://staging-api.rehome.one
+  description: Staging
+tags:
+- name: Tickets
+  description: Обращения — центральная сущность
+- name: Messages
+  description: Переписка и внутренние заметки
+- name: Chat Integration
+  description: Интеграция с AI-чатом kb-search
+- name: Canned Responses
+  description: Шаблоны ответов
+- name: SLA
+  description: Политики SLA
+- name: Automation
+  description: Правила автоматизации
+- name: Analytics
+  description: Метрики и отчёты
+- name: Webhooks
+  description: Регистрация webhook-подписок
+security:
+- BearerAuth: []
+- CookieAuth: []
+paths:
+  /api/v1/support/tickets:
+    get:
+      tags:
+      - Tickets
+      summary: Список заявок
+      description: 'Возвращает заявки с фильтрами и cursor-пагинацией. Видимость зависит от scope: заявитель видит только
+        свои; оператор — по своей команде/scope (фильтрация на уровне хранилища, ADR-0003).'
+      operationId: listTickets
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/TicketStatus'
+      - name: type
+        in: query
+        schema:
+          $ref: '#/components/schemas/TicketType'
+      - name: priority
+        in: query
+        schema:
+          $ref: '#/components/schemas/TicketPriority'
+      - name: channel
+        in: query
+        schema:
+          $ref: '#/components/schemas/TicketChannel'
+      - name: assignee_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: requester_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: team
+        in: query
+        schema:
+          $ref: '#/components/schemas/TicketTeam'
+      - name: premises_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: sla_breached
+        in: query
+        schema:
+          type: boolean
+      - name: tag
+        in: query
+        schema:
+          type: string
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - created_at
+          - -created_at
+          - resolution_due_at
+          - -resolution_due_at
+          - priority
+          - -priority
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/TicketSummary'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags:
+      - Tickets
+      summary: Создать заявку
+      operationId: createTicket
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketCreate'
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/tickets/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Tickets
+      summary: Карточка заявки
+      description: Заявитель видит только свою. Недоступная заявка → 404 (ADR-0003).
+      operationId: getTicket
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - Tickets
+      summary: Обновить заявку
+      description: Статус, приоритет, тип, команда, теги. Недопустимый переход статуса → 409.
+      operationId: updateTicket
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketUpdate'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/tickets/{id}/assign:
+    post:
+      tags:
+      - Tickets
+      summary: Назначить заявку
+      operationId: assignTicket
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - assignee_id
+              properties:
+                assignee_id:
+                  type: string
+                  format: uuid
+                team:
+                  $ref: '#/components/schemas/TicketTeam'
+  /api/v1/support/tickets/{id}/escalate:
+    post:
+      tags:
+      - Tickets
+      summary: Эскалировать на 2-ю линию
+      operationId: escalateTicket
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                team:
+                  $ref: '#/components/schemas/TicketTeam'
+                reason:
+                  type: string
+  /api/v1/support/tickets/{id}/resolve:
+    post:
+      tags:
+      - Tickets
+      summary: Отметить решённой
+      operationId: resolveTicket
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resolution_note:
+                  type: string
+  /api/v1/support/tickets/{id}/close:
+    post:
+      tags:
+      - Tickets
+      summary: Закрыть заявку
+      operationId: closeTicket
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/support/tickets/{id}/reopen:
+    post:
+      tags:
+      - Tickets
+      summary: Переоткрыть заявку
+      operationId: reopenTicket
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+  /api/v1/support/tickets/{id}/rate:
+    post:
+      tags:
+      - Tickets
+      summary: Оценка заявителя
+      description: Доступно заявителю после RESOLVED/CLOSED. Оценка 1-2 уведомляет супервайзера.
+      operationId: rateTicket
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - rating
+              properties:
+                rating:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                comment:
+                  type: string
+                  maxLength: 2000
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/tickets/{id}/messages:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Messages
+      summary: Переписка по заявке
+      description: Внутренние заметки (is_internal) скрыты от заявителя на уровне хранилища.
+      operationId: listMessages
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/TicketMessage'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags:
+      - Messages
+      summary: Добавить сообщение или внутреннюю заметку
+      description: is_internal=true → видно только операторам. Ответ заявителю доставляется по каналам уведомлений (ADR-0005).
+      operationId: createMessage
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketMessageCreate'
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/TicketMessage'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/tickets/from-chat:
+    post:
+      tags:
+      - Chat Integration
+      summary: Создать заявку из эскалации AI-чата
+      description: Вызывается kb-search при эскалации диалога на оператора. Создаёт Ticket с channel=AI_CHAT, сохраняет chat_session_id
+        и transcript. m2m-доступ (BearerAuth).
+      operationId: createTicketFromChat
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketFromChat'
+      responses:
+        '201':
+          description: Заявка создана
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/canned-responses:
+    get:
+      tags:
+      - Canned Responses
+      summary: Список шаблонов ответов
+      operationId: listCannedResponses
+      parameters:
+      - name: type
+        in: query
+        schema:
+          $ref: '#/components/schemas/TicketType'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/CannedResponse'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+    post:
+      tags:
+      - Canned Responses
+      summary: Создать шаблон
+      description: scope=staff_support+
+      operationId: createCannedResponse
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CannedResponseInput'
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/CannedResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/canned-responses/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    patch:
+      tags:
+      - Canned Responses
+      summary: Изменить шаблон
+      operationId: updateCannedResponse
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CannedResponseInput'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/CannedResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/support/sla-policies:
+    get:
+      tags:
+      - SLA
+      summary: Список SLA-политик
+      operationId: listSLAPolicies
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/SLAPolicy'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+    post:
+      tags:
+      - SLA
+      summary: Создать SLA-политику
+      description: scope=staff_admin
+      operationId: createSLAPolicy
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SLAPolicyInput'
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SLAPolicy'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/automation-rules:
+    get:
+      tags:
+      - Automation
+      summary: Список правил автоматизации
+      operationId: listAutomationRules
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/AutomationRule'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+    post:
+      tags:
+      - Automation
+      summary: Создать правило
+      description: scope=staff_admin. Триггер → условия → действия.
+      operationId: createAutomationRule
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutomationRuleInput'
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AutomationRule'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/stats:
+    get:
+      tags:
+      - Analytics
+      summary: Метрики поддержки
+      description: Сводные метрики за период для панели супервайзера и дашборда Grafana.
+      operationId: getSupportStats
+      parameters:
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SupportStats'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/support/reports/{type}:
+    get:
+      tags:
+      - Analytics
+      summary: Отчёт
+      description: 'Готовые отчёты: объём по типам/каналам, SLA, удовлетворённость, повторные обращения.'
+      operationId: getReport
+      parameters:
+      - name: type
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - volume
+          - sla
+          - satisfaction
+          - reopens
+          - operators
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: format
+        in: query
+        schema:
+          type: string
+          enum:
+          - json
+          - csv
+          default: json
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/csv:
+              schema:
+                type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/support/webhooks:
+    get:
+      tags:
+      - Webhooks
+      summary: Список подписок
+      operationId: listWebhooks
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/WebhookSubscription'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+    post:
+      tags:
+      - Webhooks
+      summary: Зарегистрировать webhook
+      description: События доставляются с HMAC-подписью (заголовок X-Signature). scope=staff_admin.
+      operationId: createWebhook
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookSubscription'
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/WebhookSubscription'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: m2m-доступ (например, от kb-search) — Bearer JWT через Client Credentials
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: rehome_session
+      description: Браузерная сессия оператора/заявителя. scope вычисляется из сессии на бэкенде.
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: Идентификатор запроса для трассировки
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Ключ идемпотентности для безопасного повтора POST
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: false
+      schema:
+        type: string
+      description: CSRF-токен для браузерных сессий (CookieAuth)
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Курсор для пагинации (из предыдущего ответа)
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+  schemas:
+    Error:
+      type: object
+      description: Ошибка в формате RFC 7807 (problem+json)
+      required:
+      - type
+      - title
+      - status
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://api.rehome.one/errors/validation
+        title:
+          type: string
+          example: Validation failed
+        status:
+          type: integer
+          example: 422
+        detail:
+          type: string
+        instance:
+          type: string
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+    Pagination:
+      type: object
+      properties:
+        next_cursor:
+          type: string
+          nullable: true
+          description: Курсор следующей страницы (null если конец)
+        has_more:
+          type: boolean
+    ResponseEnvelope:
+      type: object
+      description: Общий конверт успешного ответа
+      properties:
+        data:
+          description: Полезная нагрузка (объект или массив)
+        request_id:
+          type: string
+          format: uuid
+    TicketStatus:
+      type: string
+      enum:
+      - NEW
+      - OPEN
+      - PENDING
+      - WAITING
+      - ESCALATED
+      - RESOLVED
+      - CLOSED
+      - REOPENED
+      description: NEW — новое; OPEN — в работе; PENDING — ждёт заявителя; WAITING — ждёт третью сторону (коллаборант/юрист/банк);
+        ESCALATED — на 2-й линии; RESOLVED — решено, ждёт подтверждения; CLOSED — закрыто; REOPENED — переоткрыто
+    TicketPriority:
+      type: string
+      enum:
+      - low
+      - normal
+      - high
+      - critical
+    TicketType:
+      type: string
+      enum:
+      - PAYMENT
+      - CONTRACT
+      - MOVE_IN
+      - MOVE_OUT
+      - MAINTENANCE
+      - UTILITIES
+      - ACCOUNT
+      - LISTING
+      - COLLABORATOR
+      - COMPLAINT
+      - FRAUD
+      - OTHER
+      description: Тип обращения под предметную область аренды (раздел 3.3 ТЗ)
+    TicketChannel:
+      type: string
+      enum:
+      - AI_CHAT
+      - EMAIL
+      - WEB_FORM
+      - PHONE
+      - INTERNAL
+      description: Канал поступления. AI_CHAT — главный (эскалация из kb-search)
+    TicketTeam:
+      type: string
+      enum:
+      - support
+      - legal
+      - finance
+      description: Команда обработки
+    AuthorType:
+      type: string
+      enum:
+      - requester
+      - operator
+      - system
+      - ai
+    TicketSummary:
+      type: object
+      description: Краткая карточка заявки (для списков)
+      required:
+      - id
+      - number
+      - subject
+      - status
+      - priority
+      - type
+      - channel
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          example: RH-2026-00042
+          description: Человекочитаемый номер
+        subject:
+          type: string
+        status:
+          $ref: '#/components/schemas/TicketStatus'
+        priority:
+          $ref: '#/components/schemas/TicketPriority'
+        type:
+          $ref: '#/components/schemas/TicketType'
+        channel:
+          $ref: '#/components/schemas/TicketChannel'
+        requester_id:
+          type: string
+          format: uuid
+        assignee_id:
+          type: string
+          format: uuid
+          nullable: true
+        team:
+          oneOf:
+          - $ref: '#/components/schemas/TicketTeam'
+          - type: 'null'
+        first_response_due_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_due_at:
+          type: string
+          format: date-time
+          nullable: true
+        sla_breached:
+          type: boolean
+          description: Нарушен ли SLA (расчётное поле для индикации)
+        tags:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Ticket:
+      allOf:
+      - $ref: '#/components/schemas/TicketSummary'
+      - type: object
+        properties:
+          description:
+            type: string
+            description: Первичное описание проблемы
+          premises_id:
+            type: string
+            format: uuid
+            nullable: true
+            description: Связанная квартира
+          booking_id:
+            type: string
+            format: uuid
+            nullable: true
+            description: Связанный договор/бронь
+          collaborator_id:
+            type: string
+            format: uuid
+            nullable: true
+          service_order_id:
+            type: string
+            format: uuid
+            nullable: true
+            description: 'Связанный заказ коллаборанту (ADR-0005: разные сущности по ссылке)'
+          chat_session_id:
+            type: string
+            format: uuid
+            nullable: true
+            description: Сессия AI-чата, откуда эскалировано
+          sla_policy_id:
+            type: string
+            format: uuid
+            nullable: true
+          first_responded_at:
+            type: string
+            format: date-time
+            nullable: true
+          resolved_at:
+            type: string
+            format: date-time
+            nullable: true
+          closed_at:
+            type: string
+            format: date-time
+            nullable: true
+          reopened_count:
+            type: integer
+            default: 0
+          custom_fields:
+            type: object
+            additionalProperties: true
+          access_level:
+            type: string
+            enum:
+            - PUBLIC
+            - LOGGED
+            - AGENT
+            - STAFF
+            - LEGAL
+            - HR_RESTRICTED
+            description: Контур доступа (ADR-0003). Обычно LOGGED
+          rating:
+            type: integer
+            minimum: 1
+            maximum: 5
+            nullable: true
+          rating_comment:
+            type: string
+            nullable: true
+    TicketCreate:
+      type: object
+      required:
+      - subject
+      - type
+      properties:
+        subject:
+          type: string
+          maxLength: 300
+        description:
+          type: string
+        type:
+          $ref: '#/components/schemas/TicketType'
+        priority:
+          $ref: '#/components/schemas/TicketPriority'
+        channel:
+          $ref: '#/components/schemas/TicketChannel'
+        requester_id:
+          type: string
+          format: uuid
+          description: Если создаёт оператор от имени заявителя
+        premises_id:
+          type: string
+          format: uuid
+        booking_id:
+          type: string
+          format: uuid
+        tags:
+          type: array
+          items:
+            type: string
+        custom_fields:
+          type: object
+          additionalProperties: true
+    TicketUpdate:
+      type: object
+      description: Частичное обновление. Недопустимые переходы статуса → 422
+      properties:
+        subject:
+          type: string
+        status:
+          $ref: '#/components/schemas/TicketStatus'
+        priority:
+          $ref: '#/components/schemas/TicketPriority'
+        type:
+          $ref: '#/components/schemas/TicketType'
+        team:
+          $ref: '#/components/schemas/TicketTeam'
+        tags:
+          type: array
+          items:
+            type: string
+        custom_fields:
+          type: object
+          additionalProperties: true
+    TicketMessage:
+      type: object
+      required:
+      - id
+      - ticket_id
+      - author_type
+      - body
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        ticket_id:
+          type: string
+          format: uuid
+        author_id:
+          type: string
+          format: uuid
+          nullable: true
+        author_type:
+          $ref: '#/components/schemas/AuthorType'
+        body:
+          type: string
+        is_internal:
+          type: boolean
+          default: false
+          description: Внутренняя заметка. НЕ видна заявителю (инвариант ADR-0003)
+        attachments:
+          type: array
+          items:
+            type: string
+            format: uuid
+            description: ID файла в kb-files
+        created_at:
+          type: string
+          format: date-time
+    TicketMessageCreate:
+      type: object
+      required:
+      - body
+      properties:
+        body:
+          type: string
+        is_internal:
+          type: boolean
+          default: false
+        attachments:
+          type: array
+          items:
+            type: string
+            format: uuid
+        canned_response_id:
+          type: string
+          format: uuid
+          description: Если ответ из шаблона — для учёта usage_count
+    TicketFromChat:
+      type: object
+      description: Создание заявки из эскалации AI-чата kb-search
+      required:
+      - chat_session_id
+      - requester_id
+      properties:
+        chat_session_id:
+          type: string
+          format: uuid
+        requester_id:
+          type: string
+          format: uuid
+        subject:
+          type: string
+          description: Если не задано — генерируется из диалога
+        type:
+          $ref: '#/components/schemas/TicketType'
+        transcript:
+          type: array
+          description: История диалога для контекста оператора
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+                enum:
+                - user
+                - assistant
+              content:
+                type: string
+              at:
+                type: string
+                format: date-time
+        premises_id:
+          type: string
+          format: uuid
+        booking_id:
+          type: string
+          format: uuid
+    CannedResponse:
+      type: object
+      required:
+      - id
+      - title
+      - body
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        body:
+          type: string
+          description: Текст с переменными {{requester_name}}, {{ticket_number}}
+        type:
+          oneOf:
+          - $ref: '#/components/schemas/TicketType'
+          - type: 'null'
+        linked_article_slug:
+          type: string
+          nullable: true
+          description: Связанная статья kb-wiki
+        usage_count:
+          type: integer
+          default: 0
+    CannedResponseInput:
+      type: object
+      required:
+      - title
+      - body
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        type:
+          $ref: '#/components/schemas/TicketType'
+        linked_article_slug:
+          type: string
+    SLAPolicy:
+      type: object
+      required:
+      - id
+      - name
+      - first_response_minutes
+      - resolution_minutes
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        applies_to:
+          type: object
+          description: Условия применения
+          properties:
+            types:
+              type: array
+              items:
+                $ref: '#/components/schemas/TicketType'
+            priorities:
+              type: array
+              items:
+                $ref: '#/components/schemas/TicketPriority'
+            requester_roles:
+              type: array
+              items:
+                type: string
+        first_response_minutes:
+          type: integer
+        resolution_minutes:
+          type: integer
+        business_hours_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: График (рабочие часы / 24-7)
+        priority:
+          type: integer
+          description: Приоритет применения при пересечении условий
+    SLAPolicyInput:
+      type: object
+      required:
+      - name
+      - first_response_minutes
+      - resolution_minutes
+      properties:
+        name:
+          type: string
+        applies_to:
+          type: object
+          additionalProperties: true
+        first_response_minutes:
+          type: integer
+        resolution_minutes:
+          type: integer
+        business_hours_id:
+          type: string
+          format: uuid
+        priority:
+          type: integer
+    AutomationRule:
+      type: object
+      required:
+      - id
+      - name
+      - trigger
+      - actions
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        trigger:
+          type: string
+          enum:
+          - on_create
+          - on_update
+          - on_sla_breach
+          - time_based
+        conditions:
+          type: object
+          description: Условия (тип, приоритет, канал, ключевые слова)
+          additionalProperties: true
+        actions:
+          type: array
+          description: 'Действия: назначить, сменить статус, тег, уведомить, эскалировать'
+          items:
+            type: object
+            properties:
+              action:
+                type: string
+                enum:
+                - assign
+                - set_status
+                - set_priority
+                - add_tag
+                - notify
+                - escalate
+                - create_service_order
+              params:
+                type: object
+                additionalProperties: true
+        is_active:
+          type: boolean
+          default: true
+        order:
+          type: integer
+          description: Порядок применения
+    AutomationRuleInput:
+      type: object
+      required:
+      - name
+      - trigger
+      - actions
+      properties:
+        name:
+          type: string
+        trigger:
+          type: string
+          enum:
+          - on_create
+          - on_update
+          - on_sla_breach
+          - time_based
+        conditions:
+          type: object
+          additionalProperties: true
+        actions:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        is_active:
+          type: boolean
+          default: true
+        order:
+          type: integer
+    SupportStats:
+      type: object
+      properties:
+        period:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date
+            to:
+              type: string
+              format: date
+        tickets:
+          type: object
+          properties:
+            total:
+              type: integer
+            open:
+              type: integer
+            resolved:
+              type: integer
+            closed:
+              type: integer
+            by_type:
+              type: object
+              additionalProperties:
+                type: integer
+            by_channel:
+              type: object
+              additionalProperties:
+                type: integer
+        sla:
+          type: object
+          properties:
+            first_response_compliance_pct:
+              type: number
+            resolution_compliance_pct:
+              type: number
+            breaches:
+              type: integer
+        performance:
+          type: object
+          properties:
+            avg_first_response_minutes:
+              type: number
+            avg_resolution_minutes:
+              type: number
+            reopened_rate_pct:
+              type: number
+        quality:
+          type: object
+          properties:
+            avg_rating:
+              type: number
+            ratings_count:
+              type: integer
+        ai_chat:
+          type: object
+          description: Метрики первой линии (kb-search)
+          properties:
+            containment_rate_pct:
+              type: number
+              description: Доля диалогов без эскалации
+            escalated_count:
+              type: integer
+    WebhookSubscription:
+      type: object
+      required:
+      - url
+      - events
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+            enum:
+            - ticket.created
+            - ticket.updated
+            - ticket.assigned
+            - ticket.escalated
+            - ticket.resolved
+            - ticket.closed
+            - ticket.reopened
+            - ticket.message_added
+            - ticket.sla_breached
+            - ticket.rated
+        secret:
+          type: string
+          description: Секрет для HMAC-подписи (только при создании)
+        is_active:
+          type: boolean
+          default: true
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Не аутентифицирован
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Нет прав (scope недостаточен)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Не найдено (или недоступно по access_level — 404 вместо 403, ADR-0003)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Конфликт (например, недопустимый переход статуса)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnprocessableEntity:
+      description: Ошибка валидации
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
