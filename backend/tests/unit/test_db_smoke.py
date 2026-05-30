@@ -8,6 +8,7 @@ from collections.abc import Iterator
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.pool import QueuePool
 
 from api.config import Settings, get_settings
 from api.db import engine
@@ -45,10 +46,16 @@ def test_settings_loads_from_env_var(env_kbs_database_url: str) -> None:
 
 
 def test_engine_pool_config_applied() -> None:
-    """Engine pool сконфигурирован из Settings."""
+    """Engine pool сконфигурирован из Settings.
+
+    `create_async_engine` использует `AsyncAdaptedQueuePool`, которая
+    наследует от `QueuePool`. isinstance-guard нужен для mypy strict —
+    `Pool.size()` объявлен только на `QueuePool`.
+    """
     s = get_settings()
-    # pool.size() возвращает текущий target размер pool'а.
-    assert engine.pool.size() == s.database_pool_size
+    pool = engine.pool
+    assert isinstance(pool, QueuePool), f"Expected QueuePool subclass, got {type(pool).__name__}"
+    assert pool.size() == s.database_pool_size
 
 
 @pytest.mark.skipif(
