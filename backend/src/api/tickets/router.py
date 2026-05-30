@@ -17,13 +17,18 @@ from api.auth.principal import Principal
 from api.db import get_session
 from api.errors import ProblemException
 from api.tickets.enums import TicketStatus
-from api.tickets.history import TicketHistoryRepository
+from api.tickets.history import TicketHistoryAction, TicketHistoryRepository
+from api.tickets.messages import TicketMessageRepository, message_added_payload
 from api.tickets.repository import TicketRepository
 from api.tickets.schemas import (
     TicketCreate,
     TicketEnvelope,
     TicketHistoryListEnvelope,
     TicketHistoryRead,
+    TicketMessageCreate,
+    TicketMessageEnvelope,
+    TicketMessageListEnvelope,
+    TicketMessageRead,
     TicketRead,
     TicketUpdate,
 )
@@ -151,5 +156,67 @@ async def get_ticket_history(
     rows = await TicketHistoryRepository(session).list_for_ticket(ticket_id)
     return TicketHistoryListEnvelope(
         data=[TicketHistoryRead.model_validate(row) for row in rows],
+        request_id=_resolve_request_id(x_request_id),
+    )
+
+
+@router.get(
+    "/{ticket_id}/messages",
+    response_model=TicketMessageListEnvelope,
+    summary="Переписка по заявке",
+)
+async def list_messages(
+    ticket_id: uuid.UUID,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketMessageListEnvelope:
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    # NFR-1.3: внутренние заметки исключаются для заявителя на уровне SQL.
+    messages = await TicketMessageRepository(session).list_for_principal(ticket_id, principal)
+    return TicketMessageListEnvelope(
+        data=[TicketMessageRead.model_validate(message) for message in messages],
+        request_id=_resolve_request_id(x_request_id),
+    )
+
+
+@router.post(
+    "/{ticket_id}/messages",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TicketMessageEnvelope,
+    summary="Добавить сообщение или внутреннюю заметку",
+)
+async def create_message(
+    ticket_id: uuid.UUID,
+    payload: TicketMessageCreate,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketMessageEnvelope:
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    # NFR-1.3: внутреннюю заметку может оставить только оператор.
+    if payload.is_internal and not principal.is_operator:
+        raise ProblemException.forbidden(detail="Only operators may post internal notes")
+    message = await TicketMessageRepository(session).create(
+        ticket_id,
+        principal,
+        body=payload.body,
+        is_internal=payload.is_internal,
+        attachments=payload.attachments,
+    )
+    await TicketHistoryRepository(session).record(
+        ticket_id,
+        principal.user_id,
+        TicketHistoryAction.MESSAGE_ADDED,
+        to_value=message_added_payload(message),
+    )
+    await session.commit()
+    await session.refresh(message)
+    return TicketMessageEnvelope(
+        data=TicketMessageRead.model_validate(message),
         request_id=_resolve_request_id(x_request_id),
     )

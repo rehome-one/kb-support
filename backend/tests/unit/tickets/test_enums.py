@@ -17,6 +17,7 @@ import pytest
 
 from api.tickets.enums import (
     AccessLevel,
+    AuthorType,
     TicketChannel,
     TicketPriority,
     TicketStatus,
@@ -69,6 +70,7 @@ def _schema_enum_values(name: str) -> set[str]:
         (TicketType, "TicketType"),
         (TicketChannel, "TicketChannel"),
         (TicketTeam, "TicketTeam"),
+        (AuthorType, "AuthorType"),
     ],
 )
 def test_enum_matches_openapi_contract(
@@ -76,7 +78,8 @@ def test_enum_matches_openapi_contract(
     | type[TicketPriority]
     | type[TicketType]
     | type[TicketChannel]
-    | type[TicketTeam],
+    | type[TicketTeam]
+    | type[AuthorType],
     schema_name: str,
 ) -> None:
     """Множество значений Python-энума == множеству значений в контракте."""
