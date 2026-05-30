@@ -1,0 +1,115 @@
+"""Unit-тесты верификатора Keycloak JWT (валидный → Principal; негативы → 401)."""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+import pytest
+
+from api.auth.jwks import JwksCache
+from api.auth.jwt_verifier import JwtVerifier
+from api.auth.principal import PrincipalKind
+from api.errors import ProblemException
+from api.tickets.enums import TicketTeam
+from tests.unit.auth.conftest import AUDIENCE, ISSUER, TokenMaker
+
+
+@pytest.fixture
+def verifier(stub_fetcher: Callable[[str], Awaitable[dict[str, Any]]]) -> JwtVerifier:
+    cache = JwksCache("u", ttl_seconds=300, fetcher=stub_fetcher)
+    return JwtVerifier(jwks=cache, issuer=ISSUER, audience=AUDIENCE, algorithms=["RS256"], leeway=0)
+
+
+@pytest.mark.asyncio
+async def test_valid_token_maps_to_principal(verifier: JwtVerifier, make_token: TokenMaker) -> None:
+    user_id = uuid.uuid4()
+    token = make_token(
+        {
+            "sub": str(user_id),
+            "kbs_kind": "operator",
+            "kbs_teams": ["support", "legal"],
+            "scope": "tickets:read tickets:write",
+        }
+    )
+    principal = await verifier.verify(token)
+    assert principal.user_id == user_id
+    assert principal.kind is PrincipalKind.OPERATOR
+    assert principal.teams == frozenset({TicketTeam.SUPPORT, TicketTeam.LEGAL})
+    assert "tickets:read" in principal.scopes
+
+
+@pytest.mark.asyncio
+async def test_defaults_when_claims_absent(verifier: JwtVerifier, make_token: TokenMaker) -> None:
+    principal = await verifier.verify(make_token())
+    assert principal.kind is PrincipalKind.REQUESTER
+    assert principal.teams == frozenset()
+    assert principal.scopes == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_invalid_team_values_ignored(verifier: JwtVerifier, make_token: TokenMaker) -> None:
+    principal = await verifier.verify(make_token({"kbs_teams": ["support", "bogus"]}))
+    assert principal.teams == frozenset({TicketTeam.SUPPORT})
+
+
+@pytest.mark.asyncio
+async def test_expired_token_rejected(verifier: JwtVerifier, make_token: TokenMaker) -> None:
+    with pytest.raises(ProblemException) as exc:
+        await verifier.verify(make_token(exp_delta=-10))
+    assert exc.value.status == 401
+
+
+@pytest.mark.asyncio
+async def test_wrong_signature_rejected(
+    verifier: JwtVerifier, make_token: TokenMaker, other_private_pem: str
+) -> None:
+    # Подписан чужим ключом, но kid указывает на наш публичный → mismatch.
+    token = make_token(key=other_private_pem)
+    with pytest.raises(ProblemException) as exc:
+        await verifier.verify(token)
+    assert exc.value.status == 401
+
+
+@pytest.mark.asyncio
+async def test_wrong_audience_rejected(verifier: JwtVerifier, make_token: TokenMaker) -> None:
+    with pytest.raises(ProblemException) as exc:
+        await verifier.verify(make_token({"aud": "some-other-service"}))
+    assert exc.value.status == 401
+
+
+@pytest.mark.asyncio
+async def test_wrong_issuer_rejected(verifier: JwtVerifier, make_token: TokenMaker) -> None:
+    with pytest.raises(ProblemException) as exc:
+        await verifier.verify(make_token({"iss": "https://evil.example/realms/x"}))
+    assert exc.value.status == 401
+
+
+@pytest.mark.asyncio
+async def test_unknown_kid_rejected(verifier: JwtVerifier, make_token: TokenMaker) -> None:
+    with pytest.raises(ProblemException) as exc:
+        await verifier.verify(make_token(kid="unknown-kid"))
+    assert exc.value.status == 401
+
+
+@pytest.mark.asyncio
+async def test_malformed_token_rejected(verifier: JwtVerifier) -> None:
+    with pytest.raises(ProblemException) as exc:
+        await verifier.verify("not.a.valid.jwt")
+    assert exc.value.status == 401
+
+
+@pytest.mark.asyncio
+async def test_non_uuid_sub_rejected(verifier: JwtVerifier, make_token: TokenMaker) -> None:
+    with pytest.raises(ProblemException) as exc:
+        await verifier.verify(make_token({"sub": "not-a-uuid"}))
+    assert exc.value.status == 401
+
+
+@pytest.mark.asyncio
+async def test_token_without_kid_rejected(verifier: JwtVerifier, make_token: TokenMaker) -> None:
+    token = make_token(kid=None)
+    with pytest.raises(ProblemException) as exc:
+        await verifier.verify(token)
+    assert exc.value.status == 401

@@ -53,6 +53,21 @@ class Settings(BaseSettings):
         default="INFO",
         description="Уровень JSON-логирования (DEBUG/INFO/WARNING/ERROR).",
     )
+    # --- Keycloak Bearer JWT (#29). Пустой auth_jwks_url → auth не сконфигурирован
+    # (fail-closed 401). Реалм/issuer/audience задаются в окружении деплоя. ---
+    auth_jwks_url: str = Field(
+        default="",
+        description="URL JWKS Keycloak (.../protocol/openid-connect/certs).",
+    )
+    auth_issuer: str = Field(default="", description="Ожидаемый iss токена (пусто → не проверять).")
+    auth_audience: str = Field(
+        default="", description="Ожидаемый aud токена (пусто → не проверять)."
+    )
+    auth_algorithms: list[str] = Field(default_factory=lambda: ["RS256"])
+    auth_leeway: int = Field(default=0, ge=0, description="Допуск по времени (сек) для exp/nbf.")
+    auth_jwks_cache_ttl: int = Field(
+        default=300, ge=1, description="TTL кеша JWKS (сек) до принудительного рефреша."
+    )
 
 
 @lru_cache(maxsize=1)
