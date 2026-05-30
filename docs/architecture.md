@@ -1,6 +1,6 @@
 # Architecture overview — kb-support
 
-> Состояние: **E1 «Ядро заявок» реализован** (PR #5–#13, ~99% покрытие). Этот
+> Состояние: **E1 «Ядро заявок» реализован** (issues #5–#14 / PR #24–#39, ~99% покрытие). Этот
 > документ описывает фактическую архитектуру модуля после E1. Целевое полное ТЗ —
 > `handoff/01_postanovka/01_TZ_kb_support_v2.2.md`.
 
@@ -218,7 +218,7 @@ Enforce'ится через `scripts/check-arch-constraint.sh` + CI job `arch-co
 
 - Python imports: `from (rehome_kb_platform|kb_platform|kb_search|kb_wiki|kb_vault|kb_files|kb_auth|kb_staff|kb_hr|kb_eval|kb_infra)`.
 - TypeScript imports: то же с dash-separated именами в кавычках.
-- SQL: `(FROM|JOIN|UPDATE|INTO|TABLE) (users|premises|bookings|collaborators|service_orders|kb_articles|kb_chat_sessions|kb_documents)`.
+- SQL (case-insensitive, #28): `(FROM|JOIN|UPDATE|INTO|TABLE) (users|premises|bookings|collaborators|service_orders|kb_articles|kb_chat_sessions|kb_documents)` — ловит и `select * from users`. Свои таблицы (`tickets`/`ticket_history`/`ticket_messages`) не входят в список.
 
 Allowlist (для редких legitimate edge cases) — inline `# arch-allow: <reason ≥10 chars>`.
 Скрипт сам покрыт unit-тестами в `tests/arch-constraint/`. Локально: `make arch-check`.

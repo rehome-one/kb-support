@@ -26,7 +26,10 @@ FORBIDDEN_IMPORTS_PY='^[[:space:]]*(from|import)[[:space:]]+(rehome_kb_platform|
 FORBIDDEN_IMPORTS_TS='from[[:space:]]+["'\''](.*/)?(rehome-kb-platform|kb-platform|kb-search|kb-wiki|kb-vault|kb-files|kb-auth|kb-staff|kb-hr|kb-eval|kb-infra)["'\''/]'
 
 # SQL: FROM / JOIN / UPDATE / INSERT INTO / DROP TABLE чужой таблицы.
-# Заглавные ключевые слова — снижают false positives на текстах в комментариях.
+# Матчится case-insensitive (#28) — ловит и `select * from users`. Управление
+# false positives: имена чужих таблиц специфичны (premises/collaborators/
+# service_orders/kb_*); редкие легитимные совпадения — через allowlist.
+# Свои таблицы (tickets/ticket_history/ticket_messages) в список НЕ входят.
 FORBIDDEN_SQL='\b(FROM|JOIN|UPDATE|INTO|TABLE)[[:space:]]+(users|premises|bookings|collaborators|service_orders|kb_articles|kb_chat_sessions|kb_documents)\b'
 
 # -------- директории сканирования ----------------------------------------
@@ -72,6 +75,10 @@ scan() {
     shift 2
     local dirs=("$@")
 
+    # SQL-ключевые слова ловим без учёта регистра (#28); импорты — точно по регистру.
+    local grep_opts='-nHE'
+    [[ "$rule_name" == sql ]] && grep_opts='-inHE'
+
     for dir in "${dirs[@]}"; do
         [[ -d "$dir" ]] || continue
         local files
@@ -97,7 +104,7 @@ scan() {
                 continue
             fi
             emit_violation "$file" "$line" "$content" "$rule_name"
-        done < <(printf '%s\n' "$files" | xargs -r -d '\n' grep -nHE "$regex" 2>/dev/null || true)
+        done < <(printf '%s\n' "$files" | xargs -r -d '\n' grep "$grep_opts" "$regex" 2>/dev/null || true)
     done
 }
 
