@@ -1,19 +1,30 @@
 """FastAPI application entry point для kb-support.
 
-На bootstrap'е (#1) — минимальный skeleton с одним liveness-эндпоинтом.
-`/readyz` с проверкой DB / Redis / external API появится в #13.
+Подключает роутеры, обработчик ошибок и observability (#13): JSON-логирование,
+request_id middleware, Prometheus-метрики, readiness-проба.
 """
 
 from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import JSONResponse, Response
 
 from api import __version__
+from api.config import get_settings
+from api.db import get_session
 from api.errors import ProblemException, problem_exception_handler
+from api.observability.health import check_database
+from api.observability.logging import configure_logging, get_logger
+from api.observability.metrics import MetricsMiddleware, metrics_response
+from api.observability.request_id import RequestIdMiddleware
 from api.tickets.router import router as tickets_router
+
+configure_logging(get_settings().log_level)
+_logger = get_logger("api")
 
 app = FastAPI(
     title="kb-support",
@@ -22,6 +33,10 @@ app = FastAPI(
 )
 
 app.add_exception_handler(ProblemException, problem_exception_handler)
+# RequestIdMiddleware добавляется последним → исполняется первым (request_id
+# доступен всем внутренним слоям и логам запроса).
+app.add_middleware(MetricsMiddleware)
+app.add_middleware(RequestIdMiddleware)
 app.include_router(tickets_router)
 
 
@@ -38,10 +53,25 @@ class HealthzResponse(BaseModel):
     tags=["Infrastructure"],
 )
 def healthz() -> HealthzResponse:
-    """Возвращает 200 OK всегда, если процесс жив.
-
-    Не проверяет DB / Redis / external API — это сделает `/readyz` в #13.
-    Используется Kubernetes liveness probe и balancer'ом для базового
-    healthcheck'а.
-    """
+    """200 OK, если процесс жив (не проверяет зависимости). K8s liveness probe."""
     return HealthzResponse(status="ok")
+
+
+@app.get("/readyz", summary="Readiness probe", tags=["Infrastructure"])
+async def readyz(session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Готовность к трафику: проверка БД (`SELECT 1`). Недоступна → 503."""
+    try:
+        await check_database(session)
+    except Exception:
+        _logger.warning("readiness check failed: database unreachable")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unavailable", "detail": "database unreachable"},
+        )
+    return JSONResponse(status_code=200, content={"status": "ready"})
+
+
+@app.get("/metrics", summary="Prometheus metrics", tags=["Infrastructure"])
+def metrics() -> Response:
+    """Метрики в формате Prometheus exposition."""
+    return metrics_response()
