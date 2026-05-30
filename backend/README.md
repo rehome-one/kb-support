@@ -8,6 +8,12 @@ FastAPI-сервис модуля службы поддержки reHome.
 # Зависимости (создаёт .venv в backend/, устанавливает runtime + dev)
 make install
 
+# Поднять Postgres (docker compose)
+make db-up
+
+# Применить миграции
+make migrate
+
 # Запустить dev-сервер (auto-reload, localhost:8000)
 make dev
 
@@ -18,6 +24,18 @@ curl http://localhost:8000/healthz
 # OpenAPI docs (FastAPI Swagger UI)
 open http://localhost:8000/docs
 ```
+
+## Конфигурация (env vars)
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `KBS_DATABASE_URL` | `postgresql+asyncpg://kbsupport:devpass@localhost:5432/kbsupport` | Async DSN PostgreSQL (asyncpg driver) |
+| `KBS_DATABASE_POOL_SIZE` | `10` | Размер connection pool'а |
+| `KBS_DATABASE_POOL_MAX_OVERFLOW` | `20` | Сверх pool_size, временные коннекты |
+| `KBS_DATABASE_ECHO` | `false` | SQLAlchemy echo (debug) |
+
+Для local dev переменные подтягиваются из `.env` в `backend/`. В production —
+из env / Kubernetes secrets / etc.
 
 ## Команды разработки
 
@@ -32,21 +50,35 @@ open http://localhost:8000/docs
 | `make dev` | uvicorn с auto-reload |
 | `make docker-build` | Сборка Docker-образа `kb-support-backend:dev` |
 | `make clean` | Удаление кешей и venv |
+| `make db-up` / `db-down` / `db-logs` | docker compose: Postgres lifecycle |
+| `make migrate` / `migrate-down` | `alembic upgrade head` / `downgrade -1` |
+| `make revision m="<message>"` | Создать новую миграцию (autogenerate) |
 
 ## Структура
 
 ```
 backend/
-├── pyproject.toml     ← PEP 621 manifest + ruff/mypy/pytest/coverage конфиг
-├── Dockerfile         ← multi-stage: base → builder → runtime (non-root)
+├── pyproject.toml         ← PEP 621 manifest + ruff/mypy/pytest/coverage конфиг
+├── Dockerfile             ← multi-stage: base → builder → runtime (non-root)
 ├── Makefile
-├── conftest.py        ← pytest fixtures (TestClient)
+├── docker-compose.yml     ← Postgres 16 для local dev
+├── alembic.ini            ← Alembic config
+├── alembic/
+│   ├── env.py             ← async-aware migrations env
+│   ├── script.py.mako     ← template новой миграции
+│   └── versions/          ← миграции (`YYYYMMDD_HHMMSS_<slug>.py`)
+├── conftest.py            ← pytest fixtures (TestClient + DB session)
 ├── src/api/
 │   ├── __init__.py
-│   └── main.py        ← FastAPI app + /healthz
+│   ├── main.py            ← FastAPI app + /healthz
+│   ├── config.py          ← pydantic-settings (env KBS_*)
+│   └── db/
+│       ├── __init__.py    ← engine, session_factory, get_session()
+│       └── base.py        ← DeclarativeBase
 └── tests/
     └── unit/
-        └── test_healthz.py
+        ├── test_healthz.py
+        └── test_db_smoke.py
 ```
 
 Структура расширится по мере landing'а E1 Issues (#2 — DB, #5-#10 — Ticket

@@ -1,0 +1,30 @@
+# Local dev stack для kb-support backend.
+# Запуск: `docker compose up -d postgres`
+# Остановка: `docker compose down`
+# Сброс volume: `docker compose down -v`
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kbs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kbsupport
+      POSTGRES_USER: kbsupport
+      POSTGRES_PASSWORD: devpass
+      # Включаем JIT для тяжёлых запросов; для dev допустимо.
+      PGOPTIONS: "-c jit=on"
+    ports:
+      - "5432:5432"
+    volumes:
+      - kbs_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kbsupport -d kbsupport"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  kbs_postgres_data:
+    driver: local
