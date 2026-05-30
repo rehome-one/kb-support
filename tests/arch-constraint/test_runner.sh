@@ -63,6 +63,8 @@ echo "Running AT-001 arch-constraint test cases..."
 
 run_case python/bad_import.py 1 "python-forbidden-import"
 run_case python/bad_sql.py    1 "python-forbidden-sql"
+run_case python/bad_sql_lowercase.py 1 "python-forbidden-sql-lowercase"
+run_case python/own_tables.py 0 "python-own-tables-ok"
 run_case python/allowed.py    0 "python-allowlist"
 run_case typescript/bad_import.ts 1 "ts-forbidden-import"
 
