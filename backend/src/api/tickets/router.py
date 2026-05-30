@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.dependencies import get_current_principal
@@ -17,14 +17,22 @@ from api.auth.principal import Principal, PrincipalKind
 from api.db import get_session
 from api.errors import ProblemException
 from api.tickets.actions import TicketActionService
-from api.tickets.enums import TicketStatus
+from api.tickets.enums import (
+    TicketChannel,
+    TicketPriority,
+    TicketStatus,
+    TicketTeam,
+    TicketType,
+)
 from api.tickets.history import TicketHistoryAction, TicketHistoryRepository
 from api.tickets.messages import TicketMessageRepository, message_added_payload
 from api.tickets.models import Ticket
-from api.tickets.repository import TicketRepository
+from api.tickets.pagination import TicketSortKey
+from api.tickets.repository import TicketFilters, TicketRepository
 from api.tickets.schemas import (
     AssignInput,
     EscalateInput,
+    Pagination,
     RateInput,
     ReopenInput,
     ResolveInput,
@@ -32,11 +40,13 @@ from api.tickets.schemas import (
     TicketEnvelope,
     TicketHistoryListEnvelope,
     TicketHistoryRead,
+    TicketListEnvelope,
     TicketMessageCreate,
     TicketMessageEnvelope,
     TicketMessageListEnvelope,
     TicketMessageRead,
     TicketRead,
+    TicketSummaryRead,
     TicketUpdate,
 )
 from api.tickets.state_machine import is_allowed_transition
@@ -96,6 +106,50 @@ async def create_ticket(
     await session.refresh(ticket)
     return TicketEnvelope(
         data=TicketRead.model_validate(ticket),
+        request_id=_resolve_request_id(x_request_id),
+    )
+
+
+@router.get("", response_model=TicketListEnvelope, summary="Список заявок")
+async def list_tickets(
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    status_filter: TicketStatus | None = Query(default=None, alias="status"),
+    type_filter: TicketType | None = Query(default=None, alias="type"),
+    priority: TicketPriority | None = Query(default=None),
+    channel: TicketChannel | None = Query(default=None),
+    team: TicketTeam | None = Query(default=None),
+    assignee_id: uuid.UUID | None = Query(default=None),
+    requester_id: uuid.UUID | None = Query(default=None),
+    premises_id: uuid.UUID | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    sla_breached: bool | None = Query(default=None),
+    sort: TicketSortKey | None = Query(default=None),
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketListEnvelope:
+    filters = TicketFilters(
+        status=status_filter.value if status_filter else None,
+        type=type_filter.value if type_filter else None,
+        priority=priority.value if priority else None,
+        channel=channel.value if channel else None,
+        team=team.value if team else None,
+        assignee_id=assignee_id,
+        requester_id=requester_id,
+        premises_id=premises_id,
+        tag=tag,
+        sla_breached=sla_breached,
+    )
+    try:
+        rows, next_cursor, has_more = await TicketRepository(session).list_tickets(
+            principal, filters=filters, sort=sort, cursor=cursor, limit=limit
+        )
+    except ValueError as exc:
+        raise ProblemException.unprocessable(detail="Invalid pagination cursor") from exc
+    return TicketListEnvelope(
+        data=[TicketSummaryRead.model_validate(ticket) for ticket in rows],
+        pagination=Pagination(next_cursor=next_cursor, has_more=has_more),
         request_id=_resolve_request_id(x_request_id),
     )
 

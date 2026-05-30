@@ -11,13 +11,14 @@ from __future__ import annotations
 import asyncio
 import itertools
 import os
+import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
-from sqlalchemy import text
+from sqlalchemy import insert, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -28,7 +29,8 @@ from api.db import get_session
 from api.main import app
 from api.tickets.enums import TicketStatus, TicketTeam, TicketType
 from api.tickets.history import TicketHistoryRepository, record_changes
-from api.tickets.repository import TicketRepository
+from api.tickets.models import Ticket
+from api.tickets.repository import TicketFilters, TicketRepository
 from api.tickets.schemas import TicketCreate
 from api.tickets.state_machine import ALLOWED_TRANSITIONS
 
@@ -562,6 +564,237 @@ def test_action_not_found_for_non_owner(
 
 def test_action_unauthenticated_returns_401(client: TestClient) -> None:
     assert _action(client, str(uuid.uuid4()), "close").status_code == 401
+
+
+# --- List + cursor-пагинация + фильтры (#7) ---
+
+
+def _list_ids(client: TestClient, query: str = "") -> list[str]:
+    return [t["id"] for t in client.get(f"/api/v1/support/tickets{query}").json()["data"]]
+
+
+def test_filter_by_status(client: TestClient) -> None:
+    _use(_operator())
+    open_id = _create(client).json()["data"]["id"]
+    _set_status(open_id, TicketStatus.OPEN.value)
+    new_id = _create(client).json()["data"]["id"]
+    ids = _list_ids(client, "?status=OPEN")
+    assert open_id in ids
+    assert new_id not in ids
+
+
+def test_filter_by_type(client: TestClient) -> None:
+    _use(_operator())
+    maint = _create(client, type="MAINTENANCE").json()["data"]["id"]
+    payment = _create(client).json()["data"]["id"]
+    ids = _list_ids(client, "?type=MAINTENANCE")
+    assert maint in ids
+    assert payment not in ids
+
+
+def test_filter_by_priority(client: TestClient) -> None:
+    _use(_operator())
+    high = _create(client, priority="high").json()["data"]["id"]
+    normal = _create(client).json()["data"]["id"]
+    ids = _list_ids(client, "?priority=high")
+    assert high in ids
+    assert normal not in ids
+
+
+def test_filter_by_channel(client: TestClient) -> None:
+    _use(_operator())
+    email = _create(client, channel="EMAIL").json()["data"]["id"]
+    web = _create(client).json()["data"]["id"]
+    ids = _list_ids(client, "?channel=EMAIL")
+    assert email in ids
+    assert web not in ids
+
+
+def test_filter_by_team(client: TestClient) -> None:
+    _use(_operator())
+    with_team = _create(client).json()["data"]["id"]
+    _set_team(with_team, TicketTeam.SUPPORT.value)
+    without = _create(client).json()["data"]["id"]
+    ids = _list_ids(client, "?team=support")
+    assert with_team in ids
+    assert without not in ids
+
+
+def test_filter_by_assignee_id(client: TestClient) -> None:
+    _use(_operator())
+    assignee = uuid.uuid4()
+    assigned = _create(client).json()["data"]["id"]
+    _action(client, assigned, "assign", assignee_id=str(assignee))
+    other = _create(client).json()["data"]["id"]
+    ids = _list_ids(client, f"?assignee_id={assignee}")
+    assert assigned in ids
+    assert other not in ids
+
+
+def test_filter_by_requester_id(client: TestClient) -> None:
+    _use(_operator())  # team SUPPORT
+    requester = uuid.uuid4()
+    on_behalf = _create(client, requester_id=str(requester)).json()["data"]["id"]
+    _set_team(on_behalf, TicketTeam.SUPPORT.value)  # сделать видимой оператору
+    own = _create(client).json()["data"]["id"]
+    ids = _list_ids(client, f"?requester_id={requester}")
+    assert on_behalf in ids
+    assert own not in ids
+
+
+def test_filter_by_premises_id(client: TestClient) -> None:
+    _use(_operator())
+    premises = uuid.uuid4()
+    here = _create(client, premises_id=str(premises)).json()["data"]["id"]
+    elsewhere = _create(client).json()["data"]["id"]
+    ids = _list_ids(client, f"?premises_id={premises}")
+    assert here in ids
+    assert elsewhere not in ids
+
+
+def test_filter_by_tag(client: TestClient) -> None:
+    _use(_operator())
+    tagged = _create(client, tags=["vip", "x"]).json()["data"]["id"]
+    plain = _create(client).json()["data"]["id"]
+    ids = _list_ids(client, "?tag=vip")
+    assert tagged in ids
+    assert plain not in ids
+
+
+def test_filter_sla_breached_in_e1(client: TestClient) -> None:
+    """В E1 resolution_due_at всегда NULL → ни одна заявка не «breached»."""
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    assert ticket_id in _list_ids(client, "?sla_breached=false")
+    assert ticket_id not in _list_ids(client, "?sla_breached=true")
+
+
+def test_summary_sla_breached_is_false(client: TestClient) -> None:
+    _use(_operator())
+    _create(client)
+    data = client.get("/api/v1/support/tickets").json()["data"]
+    assert data and all(item["sla_breached"] is False for item in data)
+
+
+def test_sort_by_priority(client: TestClient) -> None:
+    _use(_operator())
+    low = _create(client, priority="low").json()["data"]["id"]
+    crit = _create(client, priority="critical").json()["data"]["id"]
+    normal = _create(client, priority="normal").json()["data"]["id"]
+    ours = {low, crit, normal}
+    desc = [i for i in _list_ids(client, "?sort=-priority") if i in ours]
+    assert desc == [crit, normal, low]
+    asc = [i for i in _list_ids(client, "?sort=priority") if i in ours]
+    assert asc == [low, normal, crit]
+
+
+def test_sort_by_created_at_is_reversible(client: TestClient) -> None:
+    _use(_operator())
+    ours = {_create(client).json()["data"]["id"] for _ in range(3)}
+    asc = [i for i in _list_ids(client, "?sort=created_at") if i in ours]
+    desc = [i for i in _list_ids(client, "?sort=-created_at") if i in ours]
+    assert set(asc) == ours
+    assert asc == list(reversed(desc))
+
+
+def test_sort_by_resolution_due_at_accepted(client: TestClient) -> None:
+    _use(_operator())
+    ours = {_create(client).json()["data"]["id"] for _ in range(2)}
+    for key in ("resolution_due_at", "-resolution_due_at"):
+        got = {i for i in _list_ids(client, f"?sort={key}") if i in ours}
+        assert got == ours
+
+
+@pytest.mark.parametrize("sort", ["-created_at", "-priority", "resolution_due_at"])
+def test_cursor_pagination_consistency(client: TestClient, sort: str) -> None:
+    """DoD: страницы покрывают весь набор без пропусков и дублей (по разным sort).
+
+    Покрывает keyset для int (priority) и datetime (created_at/resolution_due_at)
+    значений и оба направления (asc/desc).
+    """
+    _use(_operator())
+    created = {_create(client, priority="normal").json()["data"]["id"] for _ in range(5)}
+    collected: list[str] = []
+    cursor: str | None = None
+    for _ in range(10):  # предохранитель от бесконечного цикла
+        query = f"?limit=2&sort={sort}"
+        if cursor:
+            query += f"&cursor={cursor}"
+        body = client.get(f"/api/v1/support/tickets{query}").json()
+        collected.extend(t["id"] for t in body["data"])
+        if not body["pagination"]["has_more"]:
+            break
+        cursor = body["pagination"]["next_cursor"]
+        assert cursor is not None
+    ours = [i for i in collected if i in created]
+    assert sorted(ours) == sorted(created)  # все элементы
+    assert len(ours) == len(set(ours))  # без дублей
+
+
+def test_list_excludes_other_requesters_tickets(client: TestClient) -> None:
+    """🔴 NFR-1.2: список заявителя A не содержит заявок B."""
+    user_a, user_b = uuid.uuid4(), uuid.uuid4()
+    _use(Principal(user_id=user_a, kind=PrincipalKind.REQUESTER))
+    a_ticket = _create(client).json()["data"]["id"]
+    _use(Principal(user_id=user_b, kind=PrincipalKind.REQUESTER))
+    b_ticket = _create(client).json()["data"]["id"]
+
+    _use(Principal(user_id=user_a, kind=PrincipalKind.REQUESTER))
+    a_ids = _list_ids(client)
+    assert a_ticket in a_ids
+    assert b_ticket not in a_ids
+
+
+def test_invalid_cursor_returns_422(client: TestClient) -> None:
+    _use(_operator())
+    assert client.get("/api/v1/support/tickets?cursor=not-a-valid-cursor").status_code == 422
+
+
+def test_list_unauthenticated_returns_401(client: TestClient) -> None:
+    assert client.get("/api/v1/support/tickets").status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_list_10k_tickets_under_500ms() -> None:
+    """DoD NFR-2.1: пагинированный запрос на 10k заявок < 500 мс."""
+    requester = uuid.uuid4()
+    engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with factory() as session:
+            rows = [
+                {
+                    "id": uuid.uuid4(),
+                    "number": f"PERF-{requester.hex[:6]}-{i:05d}",
+                    "subject": "perf",
+                    "description": "",
+                    "type": "PAYMENT",
+                    "status": "NEW",
+                    "priority": "normal",
+                    "channel": "WEB_FORM",
+                    "access_level": "LOGGED",
+                    "requester_id": requester,
+                    "reopened_count": 0,
+                    "tags": [],
+                    "custom_fields": {},
+                }
+                for i in range(10_000)
+            ]
+            await session.execute(insert(Ticket), rows)
+            await session.commit()
+
+            principal = Principal(user_id=requester, kind=PrincipalKind.REQUESTER)
+            start = time.perf_counter()
+            result, next_cursor, has_more = await TicketRepository(session).list_tickets(
+                principal, filters=TicketFilters(), sort="-created_at", cursor=None, limit=50
+            )
+            elapsed = time.perf_counter() - start
+            assert len(result) == 50
+            assert has_more is True
+            assert next_cursor is not None
+            assert elapsed < 0.5, f"list of 10k took {elapsed:.3f}s (NFR-2.1 < 500ms)"
+    finally:
+        await engine.dispose()
 
 
 def test_create_returns_201_with_defaults(client: TestClient) -> None:
