@@ -128,8 +128,13 @@
 
 ### D.7. Архитектурная константа (специфично для kb-support)
 
+- [ ] **CI job `arch-constraint` зелёный** (AT-001 enforce'ит автоматически —
+      см. `scripts/check-arch-constraint.sh`). Если job красный — request-changes
+      без обсуждения. Если разработчик использует `# arch-allow: <reason>` —
+      проверь, что reason ≥10 chars и обоснование легитимно.
 - [ ] **Нет прямых SQL-запросов к чужим БД** (rehome.one platform,
-      rehome-kb-platform).
+      rehome-kb-platform) — CI ловит, но Reviewer проверяет, что не
+      обходится через `__import__("...")` / dynamic SQL string assembly.
 - [ ] **Нет импортов кода из rehome-kb-platform** (User/Premises/Booking/
       Collaborator модели — только через HTTP-клиент с кешированием).
 - [ ] HTTP-клиенты к external API живут в `backend/src/api/clients/` и
@@ -273,13 +278,11 @@ cd backend && pytest tests/contract/
 # Проверить, что нет утечек ПДн в логах
 grep -rE '(passport|sn=|phone=|email=)' backend/src --include='*.py'
 
-# Проверить, что нет прямых SQL к чужим таблицам
-grep -rE '(rehome_one\.|kb_platform\.|FROM users|FROM premises|FROM bookings)' \
-  backend/src --include='*.py' --include='*.sql'
-
-# Проверить, что нет импортов из rehome-kb-platform
-grep -rE 'from (rehome_kb_platform|kb_platform|kb_search|kb_wiki)' \
-  backend/src --include='*.py'
+# AT-001 — архитектурная константа (импорты + SQL к чужим таблицам)
+# Эта команда — то же самое, что job arch-constraint в CI.
+bash scripts/check-arch-constraint.sh
+# или из backend/:
+make arch-check
 
 # Проверить, что внутренние заметки не утекают
 grep -rnE 'is_internal' backend/src --include='*.py' | head

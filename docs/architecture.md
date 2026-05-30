@@ -22,6 +22,22 @@
 kb-support — отдельный сервис. Никаких shared таблиц / shared кода с
 rehome-kb-platform. Связь — только HTTP API.
 
+### AT-001 — автоматическая проверка (CI)
+
+Архитектурная константа enforce'ится через `scripts/check-arch-constraint.sh`
++ CI job `arch-constraint`. Скрипт грепит запрещённые паттерны:
+
+- Python imports: `from (rehome_kb_platform|kb_platform|kb_search|kb_wiki|kb_vault|kb_files|kb_auth|kb_staff|kb_hr|kb_eval|kb_infra)`.
+- TypeScript imports: то же с dash-separated именами в кавычках.
+- SQL: `(FROM|JOIN|UPDATE|INTO|TABLE) (users|premises|bookings|collaborators|service_orders|kb_articles|kb_chat_sessions|kb_documents)`.
+
+Allowlist (для редких legitimate edge cases) — inline `# arch-allow: <reason ≥10 chars>`.
+
+Скрипт сам покрыт unit-тестами в `tests/arch-constraint/` (4 fixture
+файла + `test_runner.sh`).
+
+Локально: `make arch-check` из `backend/`.
+
 ## Развитие документа
 
 После landing'а E1 этот файл расширится диаграммой компонентов,

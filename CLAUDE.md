@@ -59,6 +59,10 @@
    сервис; никаких прямых SQL-запросов в чужие БД, никакого импорта чужого
    кода. Доступ к User / Premises / Booking / Collaborator — **только через
    HTTP-клиент** с кешированием (ADR-0005 Решение 1).
+   **Enforce'ится в CI** через `scripts/check-arch-constraint.sh`
+   (job `arch-constraint`). Локально: `make arch-check`. Legitimate
+   edge cases — inline-комментарий `# arch-allow: <обоснование ≥10 chars>`,
+   reviewer обязан проверить обоснование.
 8. **Любая работа с ПДн** — с шифрованием в покое, журналированием в
    TicketHistory + audit_log, проверкой RBAC.
 9. **Любая работа с access_level** — с security-тестом на попытки обхода прав.
