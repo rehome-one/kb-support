@@ -16,6 +16,7 @@ from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal
 from api.db import get_session
 from api.errors import ProblemException
+from api.tickets.enums import TicketStatus
 from api.tickets.history import TicketHistoryRepository
 from api.tickets.repository import TicketRepository
 from api.tickets.schemas import (
@@ -24,9 +25,23 @@ from api.tickets.schemas import (
     TicketHistoryListEnvelope,
     TicketHistoryRead,
     TicketRead,
+    TicketUpdate,
 )
+from api.tickets.state_machine import is_allowed_transition
 
 router = APIRouter(prefix="/api/v1/support/tickets", tags=["Tickets"])
+
+# Заявитель может менять только статус (и только в CLOSED — «закрыть свой»).
+_REQUESTER_ALLOWED_FIELDS = frozenset({"status"})
+
+
+def _authorize_update(principal: Principal, payload: TicketUpdate) -> None:
+    """RBAC PATCH: оператор — любые поля; заявитель — только status→CLOSED (иначе 403)."""
+    if principal.is_operator:
+        return
+    changed_only_status = payload.model_fields_set <= _REQUESTER_ALLOWED_FIELDS
+    if not changed_only_status or payload.status is not TicketStatus.CLOSED:
+        raise ProblemException.forbidden(detail="Requesters may only close their own ticket")
 
 
 def _resolve_request_id(raw: str | None) -> uuid.UUID:
@@ -76,6 +91,41 @@ async def get_ticket(
         raise ProblemException.not_found(detail="Ticket not found")
     return TicketEnvelope(
         data=TicketRead.model_validate(ticket),
+        request_id=_resolve_request_id(x_request_id),
+    )
+
+
+@router.patch(
+    "/{ticket_id}",
+    response_model=TicketEnvelope,
+    summary="Обновить заявку",
+)
+async def update_ticket(
+    ticket_id: uuid.UUID,
+    payload: TicketUpdate,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    repo = TicketRepository(session)
+    ticket = await repo.get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    _authorize_update(principal, payload)
+    # Валидация перехода статуса (запрещённый → 422, см. план/#11 про 409).
+    if (
+        payload.status is not None
+        and payload.status.value != ticket.status
+        and not is_allowed_transition(TicketStatus(ticket.status), payload.status)
+    ):
+        raise ProblemException.unprocessable(
+            detail=f"Status transition {ticket.status} → {payload.status.value} is not allowed"
+        )
+    updated = await repo.apply_update(ticket, payload, principal)
+    await session.commit()
+    await session.refresh(updated)
+    return TicketEnvelope(
+        data=TicketRead.model_validate(updated),
         request_id=_resolve_request_id(x_request_id),
     )
 

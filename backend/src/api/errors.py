@@ -62,6 +62,15 @@ class ProblemException(Exception):
             detail=detail,
         )
 
+    @classmethod
+    def unprocessable(cls, detail: str | None = None) -> ProblemException:
+        return cls(
+            status=422,
+            title="Unprocessable Entity",
+            type_=f"{_ERROR_BASE}/unprocessable-entity",
+            detail=detail,
+        )
+
 
 def render_problem(exc: ProblemException) -> JSONResponse:
     """Собрать problem+json ответ из `ProblemException`."""
