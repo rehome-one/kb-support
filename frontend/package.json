@@ -9,7 +9,9 @@
     "lint": "next lint && prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "gen:api": "openapi-typescript ../docs/openapi.yaml -o lib/api/schema.d.ts",
+    "gen:api:check": "openapi-typescript ../docs/openapi.yaml -o /tmp/kb-support-schema-check.d.ts && diff lib/api/schema.d.ts /tmp/kb-support-schema-check.d.ts"
   },
   "dependencies": {
     "next": "14.2.35",
@@ -30,6 +32,7 @@
     "eslint-config-next": "14.2.35",
     "eslint-config-prettier": "^9.1.2",
     "jsdom": "^25.0.1",
+    "openapi-typescript": "^7.13.0",
     "postcss": "^8",
     "prettier": "^3.8.3",
     "tailwindcss": "^3.4.1",

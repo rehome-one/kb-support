@@ -199,6 +199,11 @@ jobs:
         working-directory: frontend
         run: npm run typecheck
 
+      - name: API types drift (schema.d.ts ↔ docs/openapi.yaml)
+        if: steps.check.outputs.exists == 'true'
+        working-directory: frontend
+        run: npm run gen:api:check
+
       - name: Tests
         if: steps.check.outputs.exists == 'true'
         working-directory: frontend
