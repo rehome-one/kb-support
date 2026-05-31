@@ -13,6 +13,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // `server-only` — маркер RSC; в Vitest заменяем no-op заглушкой.
+      "server-only": fileURLToPath(new URL("./test/stubs/server-only.ts", import.meta.url)),
       "@": fileURLToPath(new URL(".", import.meta.url)),
     },
   },

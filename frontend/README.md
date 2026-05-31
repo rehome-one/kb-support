@@ -16,13 +16,30 @@ npm run build     # production build (standalone)
 npm run format    # prettier --write
 ```
 
-## Структура (E2-1)
+## Структура
 
-- `app/` — App Router (layout, page, components).
+- `app/` — App Router (layout, page, login, route handler Auth.js).
+- `auth.ts` / `auth.config.ts` — конфигурация Auth.js (полная / edge для middleware).
+- `middleware.ts` — guard защищённых маршрутов.
+- `lib/` — env-валидация, логика токенов Keycloak, серверный API-клиент.
 - `vitest.config.ts` / `vitest.setup.ts` — Vitest + Testing Library (jsdom).
 - `Dockerfile` — multi-stage standalone build.
 
-Экраны (список/карточка/переписка/действия) и SSO — задачи #43–#49.
+## SSO (E2-2, #43)
+
+Вход через Keycloak (OIDC authorization code flow + PKCE) на базе **Auth.js v5**.
+Сессия — JWT в httpOnly cookie; access/refresh токены живут только на сервере и
+**не отдаются в браузер**. Серверный `lib/api-client.ts` прокидывает access token
+как `Bearer` в API kb-support.
+
+Переменные окружения — см. `.env.example` (скопировать в `.env.local`). Реальные
+значения Keycloak — у ops/kb-auth.
+
+> **Зависимость (ops/kb-auth):** access token client'а фронта должен содержать
+> `aud: kb-support`, иначе бэкенд (#29, `verify_aud`) отклонит запрос — нужен
+> audience-mapper на client'е `kb-support-frontend` в Keycloak.
+
+Экраны (список/карточка/переписка/действия) — задачи #44–#49.
 
 ## Архитектурная константа
 
