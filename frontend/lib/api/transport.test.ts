@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 // инжектируем через deps.getAccessToken.
 vi.mock("@/lib/server-token", () => ({ getServerAccessToken: vi.fn() }));
 
-import { apiFetch, UnauthenticatedError } from "@/lib/api-client";
+import { apiFetch, UnauthenticatedError } from "@/lib/api/transport";
 
 // API base из vitest.setup.ts: https://kb-support.local/api/v1
 const BASE = "https://kb-support.local/api/v1";
