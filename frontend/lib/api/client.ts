@@ -58,7 +58,7 @@ export type MessageCreateInput = BodyJson<"createMessage">;
 export type AssignInput = BodyJson<"assignTicket">;
 export type EscalateInput = BodyJson<"escalateTicket">;
 export type ResolveInput = BodyJson<"resolveTicket">;
-export type CloseInput = BodyJson<"closeTicket">;
+// closeTicket не принимает тело (см. контракт) — отдельного Input-типа нет.
 export type ReopenInput = BodyJson<"reopenTicket">;
 export type RateInput = BodyJson<"rateTicket">;
 
@@ -209,12 +209,8 @@ export function resolveTicket(
   return request<TicketResponse>(`${ticketPath(id)}/resolve`, "POST", { body: input, deps });
 }
 
-export function closeTicket(
-  id: string,
-  input: CloseInput,
-  deps?: ApiFetchDeps,
-): Promise<TicketResponse> {
-  return request<TicketResponse>(`${ticketPath(id)}/close`, "POST", { body: input, deps });
+export function closeTicket(id: string, deps?: ApiFetchDeps): Promise<TicketResponse> {
+  return request<TicketResponse>(`${ticketPath(id)}/close`, "POST", { deps });
 }
 
 export function reopenTicket(

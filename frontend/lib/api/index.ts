@@ -33,7 +33,6 @@ export type {
   AssignInput,
   EscalateInput,
   ResolveInput,
-  CloseInput,
   ReopenInput,
   RateInput,
 } from "@/lib/api/client";
