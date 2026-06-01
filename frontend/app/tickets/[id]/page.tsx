@@ -7,12 +7,14 @@ import { ApiError, getTicket, getTicketHistory, listMessages } from "@/lib/api/c
 import {
   assignAction,
   closeAction,
+  createMessageAction,
   escalateAction,
   patchTicketAction,
   reopenAction,
   resolveAction,
 } from "./actions";
 import { HistoryTimeline } from "./HistoryTimeline";
+import { MessageComposer } from "./MessageComposer";
 import { MessageThread } from "./MessageThread";
 import { RequesterContext } from "./RequesterContext";
 import { TicketActions } from "./TicketActions";
@@ -113,6 +115,7 @@ export default async function TicketCardPage({ params }: { params: { id: string 
         ) : (
           <MessageThread messages={messages.items} />
         )}
+        <MessageComposer ticketId={ticket.id} createMessageAction={createMessageAction} />
       </Section>
 
       <Section title="История">

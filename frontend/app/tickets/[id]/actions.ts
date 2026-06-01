@@ -6,12 +6,14 @@ import {
   ApiError,
   assignTicket,
   closeTicket,
+  createMessage,
   escalateTicket,
   reopenTicket,
   resolveTicket,
   updateTicket,
   type AssignInput,
   type EscalateInput,
+  type MessageCreateInput,
   type ReopenInput,
   type ResolveInput,
   type TicketUpdateInput,
@@ -65,4 +67,13 @@ export async function closeAction(id: string): Promise<ActionResult> {
 
 export async function reopenAction(id: string, input: ReopenInput): Promise<ActionResult> {
   return run(id, () => reopenTicket(id, input));
+}
+
+// Добавление сообщения/внутренней заметки. is_internal=true бэкенд примет только от
+// оператора (иначе 403, NFR-1.3) — фронт лишь передаёт флаг. Idempotency-Key — в хелпере.
+export async function createMessageAction(
+  id: string,
+  input: MessageCreateInput,
+): Promise<ActionResult> {
+  return run(id, () => createMessage(id, input));
 }

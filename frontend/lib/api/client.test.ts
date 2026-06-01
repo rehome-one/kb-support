@@ -8,12 +8,15 @@ import {
   ApiError,
   assignTicket,
   closeTicket,
+  createMessage,
   getTicket,
   getTicketHistory,
   listTickets,
   request,
   updateTicket,
 } from "@/lib/api/client";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // API base из vitest.setup.ts (корень хоста); путь /api/v1 добавляют хелперы.
 const BASE = "https://kb-support.local";
@@ -76,6 +79,27 @@ describe("typed client — success", () => {
     expect(url).toBe(`${BASE}/api/v1/support/tickets/t1/close`);
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeUndefined();
+  });
+
+  it("createMessage шлёт is_internal в теле и Idempotency-Key (uuid)", async () => {
+    const d = deps(json({ data: { id: "m1" } }, 201));
+    await createMessage("t1", { body: "заметка", is_internal: true }, d);
+    const [url, init] = d.fetchImpl.mock.calls[0];
+    expect(url).toBe(`${BASE}/api/v1/support/tickets/t1/messages`);
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ body: "заметка", is_internal: true }));
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toMatch(UUID_RE);
+  });
+
+  it("request() переопределяет Idempotency-Key вызывающим", async () => {
+    const d = deps(json({ data: {} }, 201));
+    await request("/api/v1/support/tickets/t1/messages", "POST", {
+      body: { body: "x" },
+      idempotencyKey: "fixed-idem-key",
+      deps: d,
+    });
+    const [, init] = d.fetchImpl.mock.calls[0];
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("fixed-idem-key");
   });
 
   it("getTicketHistory шлёт GET на /history и парсит конверт", async () => {
