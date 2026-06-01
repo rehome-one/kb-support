@@ -29,8 +29,8 @@ npm run format    # prettier --write
 
 Вход через Keycloak (OIDC authorization code flow + PKCE) на базе **Auth.js v5**.
 Сессия — JWT в httpOnly cookie; access/refresh токены живут только на сервере и
-**не отдаются в браузер**. Серверный `lib/api-client.ts` прокидывает access token
-как `Bearer` в API kb-support.
+**не отдаются в браузер**. Серверный транспорт `lib/api/transport.ts` прокидывает
+access token как `Bearer` в API kb-support.
 
 Переменные окружения — см. `.env.example` (скопировать в `.env.local`). Реальные
 значения Keycloak — у ops/kb-auth.
@@ -39,7 +39,26 @@ npm run format    # prettier --write
 > `aud: kb-support`, иначе бэкенд (#29, `verify_aud`) отклонит запрос — нужен
 > audience-mapper на client'е `kb-support-frontend` в Keycloak.
 
-Экраны (список/карточка/переписка/действия) — задачи #44–#49.
+## API-клиент (E2-3, #44)
+
+Типобезопасный клиент к kb-support — единственная публичная поверхность `lib/api`:
+
+- `lib/api/schema.d.ts` — **сгенерированные** типы из контракта `docs/openapi.yaml`
+  (`openapi-typescript`). Машинный артефакт, коммитится.
+- `lib/api/client.ts` — типизированные хелперы (`listTickets`/`getTicket`/
+  `updateTicket`/`listMessages`/`createMessage` + actions), `ApiError` (RFC7807),
+  генерация `X-Request-Id`.
+- `lib/api/transport.ts` — низкоуровневый транспорт (Bearer/server-only) из #43.
+
+```bash
+npm run gen:api        # регенерировать типы из ../docs/openapi.yaml
+npm run gen:api:check  # проверка drift (CI: типы ↔ контракт)
+```
+
+> `ApiError.message` = `<status> <title>` (без `detail` — потенциальные ПДн);
+> полный problem доступен через `error.problem`, но не сериализуется в логи.
+
+Экраны (список/карточка/переписка/действия) — задачи #45–#49.
 
 ## Архитектурная константа
 
