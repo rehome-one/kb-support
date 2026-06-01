@@ -69,6 +69,8 @@ export interface RequestOptions {
   body?: unknown;
   /** Переопределяет генерируемый X-Request-Id (по умолчанию crypto.randomUUID). */
   requestId?: string;
+  /** Idempotency-Key (контракт, optional) для безопасного повтора POST. */
+  idempotencyKey?: string;
   signal?: AbortSignal;
   /** Инъекция транспорта для тестов. */
   deps?: ApiFetchDeps;
@@ -116,6 +118,9 @@ export async function request<T>(
     Accept: "application/json",
     "X-Request-Id": options.requestId ?? crypto.randomUUID(),
   });
+  if (options.idempotencyKey) {
+    headers.set("Idempotency-Key", options.idempotencyKey);
+  }
 
   let body: string | undefined;
   if (options.body !== undefined) {
@@ -182,7 +187,12 @@ export function createMessage(
   input: MessageCreateInput,
   deps?: ApiFetchDeps,
 ): Promise<MessageResponse> {
-  return request<MessageResponse>(`${ticketPath(id)}/messages`, "POST", { body: input, deps });
+  // Уникальный ключ на отправку — безопасный повтор POST (сервер дедуплицирует реплей).
+  return request<MessageResponse>(`${ticketPath(id)}/messages`, "POST", {
+    body: input,
+    idempotencyKey: crypto.randomUUID(),
+    deps,
+  });
 }
 
 export function assignTicket(
