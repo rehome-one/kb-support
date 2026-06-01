@@ -270,6 +270,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required:
               - assignee_id
               properties:
@@ -277,7 +278,9 @@ paths:
                   type: string
                   format: uuid
                 team:
-                  $ref: '#/components/schemas/TicketTeam'
+                  oneOf:
+                  - $ref: '#/components/schemas/TicketTeam'
+                  - type: 'null'
   /api/v1/support/tickets/{id}/escalate:
     post:
       tags:
@@ -311,14 +314,17 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               properties:
                 team:
-                  $ref: '#/components/schemas/TicketTeam'
+                  oneOf:
+                  - $ref: '#/components/schemas/TicketTeam'
+                  - type: 'null'
                 reason:
                   type: string
   /api/v1/support/tickets/{id}/resolve:
@@ -354,11 +360,12 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               properties:
                 resolution_note:
                   type: string
@@ -427,11 +434,12 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               properties:
                 reason:
                   type: string
@@ -1327,6 +1335,12 @@ components:
       - $ref: '#/components/schemas/TicketSummary'
       - type: object
         properties:
+          allowed_status_transitions:
+            type: array
+            readOnly: true
+            description: Статусы, в которые разрешён переход из текущего (машина состояний §3.2)
+            items:
+              $ref: '#/components/schemas/TicketStatus'
           description:
             type: string
             description: Первичное описание проблемы

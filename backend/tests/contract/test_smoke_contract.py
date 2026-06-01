@@ -48,6 +48,44 @@ def test_create_ticket_response_conforms(operator_client: TestClient) -> None:
 
 
 @requires_postgres
+def test_get_ticket_exposes_allowed_status_transitions(operator_client: TestClient) -> None:
+    """getTicket отдаёт allowed_status_transitions (новое заявка NEW → OPEN/CLOSED)."""
+    created = operator_client.post(
+        "/api/v1/support/tickets", json={"subject": "transitions", "type": "PAYMENT"}
+    )
+    assert created.status_code == 201
+    ticket_id = created.json()["data"]["id"]
+
+    resp = operator_client.get(f"/api/v1/support/tickets/{ticket_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    # Явная проверка присутствия: поле optional + у Ticket нет additionalProperties:false,
+    # поэтому conform сам по себе наличие не гарантирует.
+    assert "allowed_status_transitions" in body["data"]
+    assert body["data"]["allowed_status_transitions"] == ["OPEN", "CLOSED"]
+    assert_response_conforms("/api/v1/support/tickets/{id}", "get", "200", body)
+
+
+@requires_postgres
+def test_assign_accepts_documented_body(operator_client: TestClient) -> None:
+    """assign принимает задокументированное тело {assignee_id} и conform'ит Ticket."""
+    created = operator_client.post(
+        "/api/v1/support/tickets", json={"subject": "assign", "type": "PAYMENT"}
+    )
+    assert created.status_code == 201
+    ticket_id = created.json()["data"]["id"]
+
+    assignee_id = "11111111-2222-3333-4444-555555555555"
+    resp = operator_client.post(
+        f"/api/v1/support/tickets/{ticket_id}/assign", json={"assignee_id": assignee_id}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data"]["assignee_id"] == assignee_id
+    assert_response_conforms("/api/v1/support/tickets/{id}/assign", "post", "200", body)
+
+
+@requires_postgres
 def test_ticket_history_response_conforms(operator_client: TestClient) -> None:
     """Drift-детектор: реальный ответ GET /{id}/history соответствует TicketHistory."""
     # Создание заявки пишет неизменяемую строку журнала `created` → history непуст,

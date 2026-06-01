@@ -6,6 +6,8 @@ vi.mock("@/lib/server-token", () => ({ getServerAccessToken: vi.fn() }));
 
 import {
   ApiError,
+  assignTicket,
+  closeTicket,
   getTicket,
   getTicketHistory,
   listTickets,
@@ -56,6 +58,24 @@ describe("typed client — success", () => {
     expect(url).toBe(`${BASE}/api/v1/support/tickets/t1`);
     expect(init?.method).toBe("PATCH");
     expect(init?.body).toBe(JSON.stringify({ priority: "high" }));
+  });
+
+  it("assignTicket шлёт POST с assignee_id", async () => {
+    const d = deps(json({ data: { id: "t1" } }));
+    await assignTicket("t1", { assignee_id: "u9" }, d);
+    const [url, init] = d.fetchImpl.mock.calls[0];
+    expect(url).toBe(`${BASE}/api/v1/support/tickets/t1/assign`);
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ assignee_id: "u9" }));
+  });
+
+  it("closeTicket шлёт POST без тела", async () => {
+    const d = deps(json({ data: { id: "t1" } }));
+    await closeTicket("t1", d);
+    const [url, init] = d.fetchImpl.mock.calls[0];
+    expect(url).toBe(`${BASE}/api/v1/support/tickets/t1/close`);
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBeUndefined();
   });
 
   it("getTicketHistory шлёт GET на /history и парсит конверт", async () => {

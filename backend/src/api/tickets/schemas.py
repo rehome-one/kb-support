@@ -25,6 +25,7 @@ from api.tickets.enums import (
     TicketTeam,
     TicketType,
 )
+from api.tickets.state_machine import is_allowed_transition
 
 
 class TicketCreate(BaseModel):
@@ -160,6 +161,20 @@ class TicketRead(BaseModel):
     insurance_event_id: uuid.UUID | None = None
     acceptance_act_id: uuid.UUID | None = None
     case_details: dict[str, Any] | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def allowed_status_transitions(self) -> list[TicketStatus]:
+        """Статусы, в которые разрешён переход из текущего (без самого текущего).
+
+        Источник истины — `state_machine.ALLOWED_TRANSITIONS`; экспонируется, чтобы
+        фронт подсвечивал недопустимые переходы без дублирования таблицы (#60).
+        """
+        return [
+            status
+            for status in TicketStatus
+            if status != self.status and is_allowed_transition(self.status, status)
+        ]
 
 
 class TicketEnvelope(BaseModel):

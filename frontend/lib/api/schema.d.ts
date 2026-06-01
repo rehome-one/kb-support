@@ -517,6 +517,8 @@ export interface components {
             updated_at?: string;
         };
         Ticket: components["schemas"]["TicketSummary"] & {
+            /** @description Статусы, в которые разрешён переход из текущего (машина состояний §3.2) */
+            readonly allowed_status_transitions?: components["schemas"]["TicketStatus"][];
             /** @description Первичное описание проблемы */
             description?: string;
             /**
@@ -1083,7 +1085,7 @@ export interface operations {
                 "application/json": {
                     /** Format: uuid */
                     assignee_id: string;
-                    team?: components["schemas"]["TicketTeam"];
+                    team?: components["schemas"]["TicketTeam"] | null;
                 };
             };
         };
@@ -1116,10 +1118,10 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": {
-                    team?: components["schemas"]["TicketTeam"];
+                    team?: components["schemas"]["TicketTeam"] | null;
                     reason?: string;
                 };
             };
@@ -1153,7 +1155,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": {
                     resolution_note?: string;
@@ -1219,7 +1221,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": {
                     reason?: string;
