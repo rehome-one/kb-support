@@ -49,13 +49,29 @@ export default async function TicketCardPage({ params }: { params: { id: string 
   const { id } = params;
 
   let ticket;
+  let loadFailed = false;
   try {
     const res = await getTicket(id);
     ticket = res.data;
   } catch (error) {
     // 404 (в т.ч. anti-enumeration для чужой заявки) — стандартная not-found.
     if (error instanceof ApiError && error.status === 404) notFound();
-    ticket = undefined;
+    // Иная ошибка (5xx/сеть/недокументированная) — не «не найдено», а сбой загрузки.
+    loadFailed = true;
+  }
+
+  if (loadFailed) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-6 p-8">
+        <OperatorHeader />
+        <Link href="/tickets" className="w-fit text-sm text-gray-600 underline hover:text-gray-900">
+          ← К списку заявок
+        </Link>
+        <p role="alert" className="text-sm text-red-600">
+          Не удалось загрузить заявку. Попробуйте позже.
+        </p>
+      </main>
+    );
   }
   if (!ticket) notFound();
 
