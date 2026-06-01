@@ -16,6 +16,7 @@ import {
   type ResolveInput,
   type TicketUpdateInput,
 } from "@/lib/api/client";
+import { UnauthenticatedError } from "@/lib/api/transport";
 
 import type { ActionResult } from "./types";
 
@@ -27,6 +28,9 @@ async function run(id: string, op: () => Promise<unknown>): Promise<ActionResult
     revalidatePath(`/tickets/${id}`);
     return { ok: true };
   } catch (error) {
+    if (error instanceof UnauthenticatedError) {
+      return { ok: false, status: 401, title: "Сессия истекла — войдите снова" };
+    }
     if (error instanceof ApiError) {
       return { ok: false, status: error.status, title: error.title };
     }
