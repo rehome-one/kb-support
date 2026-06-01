@@ -14,6 +14,8 @@ npm run typecheck # tsc --noEmit (strict)
 npm test          # vitest (watch); CI: npm test -- --run
 npm run build     # production build (standalone)
 npm run format    # prettier --write
+npm run test:e2e         # Playwright smoke (требует build + chromium)
+npm run test:e2e:install # доустановить браузер chromium
 ```
 
 ## Структура
@@ -59,6 +61,31 @@ npm run gen:api:check  # проверка drift (CI: типы ↔ контрак
 > полный problem доступен через `error.problem`, но не сериализуется в логи.
 
 Экраны (список/карточка/переписка/действия) — задачи #45–#49.
+
+## E2E smoke (E2-8, #49)
+
+Сквозной Playwright-smoke рабочего места: вход → список заявок → карточка →
+отправка ответа. Самодостаточен — без реального Keycloak/бэкенда:
+
+- **Мок-бэкенд** — детерминированный Node-сервер `test/e2e/fixture-server.mjs`
+  (формы из `docs/openapi.yaml`, фиксированные id, in-memory персистенция
+  отправленных сообщений). Prism отвергнут: в спеке мало `example`, dynamic-mock
+  даёт нестабильные данные.
+- **Mock-login** — `test/e2e/global-setup.ts` кует валидную session-cookie тем
+  же `@auth/core/jwt`, что и приложение (прод-auth не модифицируется). Имя/salt
+  cookie — `__Secure-authjs.session-token` (прод-режим `next start`).
+- Запуск: `npm run build && npm run test:e2e:install && npm run test:e2e`
+  (Playwright поднимает фикстуру и `next start`). В CI — отдельный job
+  `frontend-e2e`.
+
+```bash
+npm run build
+npm run test:e2e:install   # один раз — скачать chromium
+npm run test:e2e
+```
+
+> Реальный E2E против Keycloak/бэкенда — **#52** (ждёт ops-провижининга realm).
+> Здесь smoke доказывает интеграцию UI ↔ клиент ↔ HTTP-граница.
 
 ## Архитектурная константа
 

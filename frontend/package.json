@@ -9,6 +9,8 @@
     "lint": "next lint && prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium",
     "format": "prettier --write .",
     "gen:api": "openapi-typescript ../docs/openapi.yaml -o lib/api/schema.d.ts",
     "gen:api:check": "openapi-typescript ../docs/openapi.yaml -o /tmp/kb-support-schema-check.d.ts && diff lib/api/schema.d.ts /tmp/kb-support-schema-check.d.ts"
@@ -21,6 +23,7 @@
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
