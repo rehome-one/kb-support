@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import datetime
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -45,6 +45,34 @@ class TicketCreate(BaseModel):
     booking_id: uuid.UUID | None = None
     tags: list[str] | None = None
     custom_fields: dict[str, Any] | None = None
+
+
+class TranscriptTurn(BaseModel):
+    """Реплика диалога AI-чата (контракт `TicketFromChat.transcript[]`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str
+    at: datetime.datetime | None = None
+
+
+class TicketFromChat(BaseModel):
+    """Тело POST /tickets/from-chat — эскалация из kb-search (контракт `TicketFromChat`).
+
+    `requester_id` обязателен и берётся из тела: вызов m2m (kb-search), принципал —
+    SERVICE, не заявитель. Endpoint ограничен `kind=SERVICE` (anti-spoofing, #69).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    chat_session_id: uuid.UUID
+    requester_id: uuid.UUID
+    subject: str | None = Field(default=None, min_length=1, max_length=300)
+    type: TicketType | None = None
+    transcript: list[TranscriptTurn] | None = None
+    premises_id: uuid.UUID | None = None
+    booking_id: uuid.UUID | None = None
 
 
 class TicketUpdate(BaseModel):

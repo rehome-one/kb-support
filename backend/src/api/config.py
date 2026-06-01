@@ -53,6 +53,15 @@ class Settings(BaseSettings):
         default="INFO",
         description="Уровень JSON-логирования (DEBUG/INFO/WARNING/ERROR).",
     )
+    chat_transcript_max_turns: int = Field(
+        default=200,
+        ge=1,
+        le=5000,
+        description=(
+            "Максимум реплик в transcript эскалации из чата (E3-1, #69). Защита "
+            "от злоупотребления размером тела; превышение → 422."
+        ),
+    )
     # --- Keycloak Bearer JWT (#29). Пустой auth_jwks_url → auth не сконфигурирован
     # (fail-closed 401). Реалм/issuer/audience задаются в окружении деплоя. ---
     auth_jwks_url: str = Field(
