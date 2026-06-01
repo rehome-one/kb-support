@@ -18,10 +18,10 @@ import uuid
 from collections.abc import Callable
 from typing import Any, TypeVar
 
+from api.clients.auth import TokenProvider
 from api.clients.base import ResilientHttpClient
 from api.clients.cache import Cache
 from api.clients.errors import ExternalServiceError
-from api.clients.platform.auth import TokenProvider
 from api.clients.platform.models import Booking, Collaborator, Contact, Premises, UserProfile
 from api.observability.logging import get_logger
 

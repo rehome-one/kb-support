@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
+from api.clients.auth import StaticTokenProvider, TokenProvider
 from api.clients.platform.adapter import HttpPlatformClient
-from api.clients.platform.auth import StaticTokenProvider, TokenProvider
 from api.clients.platform.models import (
     Booking,
     Collaborator,

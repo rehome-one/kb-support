@@ -124,6 +124,21 @@ class Settings(BaseSettings):
         description="TTL кеша справочных данных платформы (сек). Read-only, ПДн.",
     )
 
+    # --- kb-search возврат ответа оператора (E3-4, #72). Провизорный контракт
+    # ADR-0006 Решение 3. ПУСТОЙ kb_search_api_token = функция выключена (gate):
+    # без реального m2m-токена (#77) фоновая доставка не планируется. ---
+    kb_search_api_base_url: str = Field(
+        default="http://localhost:8082",
+        description="Базовый URL kb-search API (возврат ответа в chat-session).",
+    )
+    kb_search_api_token: str = Field(
+        default="",
+        description=(
+            "m2m-токен для StaticTokenProvider (dev/test). ПУСТО → возврат ответа "
+            "в чат ВЫКЛЮЧЕН. Реальный ClientCredentials — #77."
+        ),
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

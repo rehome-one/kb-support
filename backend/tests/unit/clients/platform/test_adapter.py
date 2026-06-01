@@ -10,12 +10,12 @@ from unittest import mock
 
 import httpx
 
+from api.clients.auth import StaticTokenProvider
 from api.clients.base import ResilientHttpClient
 from api.clients.cache import InMemoryCache
 from api.clients.circuit_breaker import CircuitBreaker
 from api.clients.platform import adapter as adapter_module
 from api.clients.platform.adapter import HttpPlatformClient
-from api.clients.platform.auth import StaticTokenProvider
 from api.clients.platform.models import Booking, Collaborator, Premises, UserProfile
 from api.clients.retry import RetryPolicy
 

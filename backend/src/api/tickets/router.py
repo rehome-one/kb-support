@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.dependencies import get_current_principal
@@ -18,6 +18,7 @@ from api.config import get_settings
 from api.db import get_session
 from api.errors import ProblemException
 from api.tickets.actions import TicketActionService
+from api.tickets.chat_return import maybe_schedule_return
 from api.tickets.enums import (
     TicketChannel,
     TicketPriority,
@@ -294,6 +295,7 @@ async def list_messages(
 async def create_message(
     ticket_id: uuid.UUID,
     payload: TicketMessageCreate,
+    background: BackgroundTasks,
     principal: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_session),
     x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
@@ -319,6 +321,10 @@ async def create_message(
     )
     await session.commit()
     await session.refresh(message)
+    # E3-4 (#72): публичный ответ оператора по AI_CHAT-заявке возвращается в
+    # chat-session фоном (NFR-1.3 gate + плоский DTO извлекается здесь, пока жива
+    # сессия; внутренние заметки НЕ уходят). Выключено без kb_search_api_token.
+    maybe_schedule_return(background, ticket, message, get_settings())
     return TicketMessageEnvelope(
         data=TicketMessageRead.model_validate(message),
         request_id=_resolve_request_id(x_request_id),
