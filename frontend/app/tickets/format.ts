@@ -93,3 +93,51 @@ export function shortId(id: string | null | undefined): string {
   if (!id) return "—";
   return id.length > 8 ? id.slice(0, 8) : id;
 }
+
+export const AUTHOR_TYPE_LABELS: Record<string, string> = {
+  requester: "Заявитель",
+  operator: "Оператор",
+  system: "Система",
+  ai: "AI-ассистент",
+};
+
+export const HISTORY_ACTION_LABELS: Record<string, string> = {
+  created: "Создана",
+  status_changed: "Смена статуса",
+  reassigned: "Переназначение",
+  priority_changed: "Смена приоритета",
+  type_changed: "Смена типа",
+  team_changed: "Смена команды",
+  tags_updated: "Обновление меток",
+  message_added: "Добавлено сообщение",
+  rated: "Оценка",
+};
+
+function formatScalar(value: unknown): string {
+  if (value === null || value === undefined) return "∅";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function describeValues(value: Record<string, unknown> | null | undefined): string {
+  if (!value) return "";
+  return Object.entries(value)
+    .map(([key, val]) => `${key}: ${formatScalar(val)}`)
+    .join(", ");
+}
+
+/**
+ * Человекочитаемый diff строки журнала. Обрабатывает `created` (from=null → «→ …»),
+ * произвольные ключи `{"<поле>": <значение>}` и служебные объекты (`message_added`).
+ */
+export function formatHistoryDiff(
+  from: Record<string, unknown> | null | undefined,
+  to: Record<string, unknown> | null | undefined,
+): string {
+  const before = describeValues(from);
+  const after = describeValues(to);
+  if (!before && !after) return "";
+  if (!before) return `→ ${after}`;
+  if (!after) return `${before} →`;
+  return `${before} → ${after}`;
+}
