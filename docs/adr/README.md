@@ -15,7 +15,7 @@
 | [0003](0003-knowledge-base-tiers.md) | Двухконтурность базы знаний / access_level | Принят (2026-05) | **Reference-копия** из rehome-kb-platform на момент bootstrap'а kb-support |
 | [0004](0004-collaborators-model.md) | Модель коллаборантов | Принят (2026-05) | **Reference-копия** из rehome-kb-platform на момент bootstrap'а kb-support |
 | [0005](0005-support-module.md) | Модуль службы поддержки (5 решений) | **Принят** (2026-05) | Главный ADR kb-support |
-| [0006](0006-platform-and-chat-contracts.md) | Провизорные контракты platform API + возврат ответа в kb-search (E3) | **Предложено** (2026-06-01) | Разблокирует TD-PA-001 для E3 (#68) |
+| [0006](0006-platform-and-chat-contracts.md) | Провизорные контракты platform API + возврат ответа в kb-search (E3) | **Принят** (2026-06-01) | Разблокирует TD-PA-001 для E3 (#68) |
 
 ## Про reference-копии
 
