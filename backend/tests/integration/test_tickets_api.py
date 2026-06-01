@@ -1105,3 +1105,96 @@ def test_from_chat_transcript_over_limit_returns_422(client: TestClient) -> None
     transcript = [{"role": "user", "content": f"m{i}"} for i in range(limit + 1)]
     resp = _from_chat(client, transcript=transcript)
     assert resp.status_code == 422, resp.text
+
+
+# --- E3-4 (#72): возврат ответа оператора в kb-search (триггер create_message) ---
+
+
+def _ai_chat_ticket_for_support(client: TestClient) -> str:
+    """Создать AI_CHAT-заявку с chat_session_id (from-chat) и отдать её команде
+    SUPPORT, чтобы оператор SUPPORT мог отвечать."""
+    _use(_service())
+    ticket_id = str(_from_chat(client, chat_session_id=str(uuid.uuid4())).json()["data"]["id"])
+    _set_team(ticket_id, TicketTeam.SUPPORT.value)
+    return ticket_id
+
+
+def _enable_return_and_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[object]:
+    """Включить возврат в чат (непустой токен) и подменить фоновую доставку
+    рекордером — без реальной сети."""
+    import api.tickets.chat_return as chat_return
+    import api.tickets.router as router_mod
+
+    captured: list[object] = []
+
+    async def _recorder(reply: object, settings: object) -> None:
+        captured.append(reply)
+
+    monkeypatch.setattr(chat_return, "dispatch_operator_reply", _recorder)
+    enabled = get_settings().model_copy(update={"kb_search_api_token": "test-m2m"})
+    monkeypatch.setattr(router_mod, "get_settings", lambda: enabled)
+    return captured
+
+
+def test_operator_public_reply_schedules_return(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _enable_return_and_capture(monkeypatch)
+    ticket_id = _ai_chat_ticket_for_support(client)
+
+    _use(
+        Principal(
+            user_id=uuid.uuid4(),
+            kind=PrincipalKind.OPERATOR,
+            teams=frozenset({TicketTeam.SUPPORT}),
+        )
+    )
+    resp = _post_message(client, ticket_id, "Здравствуйте, помогаем", is_internal=False)
+    assert resp.status_code == 201, resp.text
+    assert len(captured) == 1
+
+
+def test_operator_internal_note_does_not_schedule_return(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # КРИТИЧНО (NFR-1.3): внутренняя заметка НЕ возвращается в чат.
+    captured = _enable_return_and_capture(monkeypatch)
+    ticket_id = _ai_chat_ticket_for_support(client)
+
+    _use(
+        Principal(
+            user_id=uuid.uuid4(),
+            kind=PrincipalKind.OPERATOR,
+            teams=frozenset({TicketTeam.SUPPORT}),
+        )
+    )
+    resp = _post_message(client, ticket_id, "внутренняя заметка", is_internal=True)
+    assert resp.status_code == 201, resp.text
+    assert captured == []
+
+
+def test_return_disabled_when_token_empty(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import api.tickets.chat_return as chat_return
+
+    captured: list[object] = []
+
+    async def _recorder(reply: object, settings: object) -> None:
+        captured.append(reply)
+
+    monkeypatch.setattr(chat_return, "dispatch_operator_reply", _recorder)
+    # get_settings НЕ подменяем → kb_search_api_token пустой (дефолт) → выключено.
+    ticket_id = _ai_chat_ticket_for_support(client)
+    _use(
+        Principal(
+            user_id=uuid.uuid4(),
+            kind=PrincipalKind.OPERATOR,
+            teams=frozenset({TicketTeam.SUPPORT}),
+        )
+    )
+    resp = _post_message(client, ticket_id, "ответ", is_internal=False)
+    assert resp.status_code == 201, resp.text
+    assert captured == []
