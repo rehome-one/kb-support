@@ -4,9 +4,18 @@ import { notFound } from "next/navigation";
 import { OperatorHeader } from "@/app/components/OperatorHeader";
 import { ApiError, getTicket, getTicketHistory, listMessages } from "@/lib/api/client";
 
+import {
+  assignAction,
+  closeAction,
+  escalateAction,
+  patchTicketAction,
+  reopenAction,
+  resolveAction,
+} from "./actions";
 import { HistoryTimeline } from "./HistoryTimeline";
 import { MessageThread } from "./MessageThread";
 import { RequesterContext } from "./RequesterContext";
+import { TicketActions } from "./TicketActions";
 import { TicketDetail } from "./TicketDetail";
 import type { TicketHistoryEntry, TicketMessage } from "./types";
 
@@ -85,6 +94,15 @@ export default async function TicketCardPage({ params }: { params: { id: string 
       </Link>
 
       <TicketDetail ticket={ticket} />
+      <TicketActions
+        ticket={ticket}
+        patchAction={patchTicketAction}
+        assignAction={assignAction}
+        escalateAction={escalateAction}
+        resolveAction={resolveAction}
+        closeAction={closeAction}
+        reopenAction={reopenAction}
+      />
       <RequesterContext ticket={ticket} />
 
       <Section title="Переписка">
