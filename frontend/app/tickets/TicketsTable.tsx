@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import {
   PRIORITY_LABELS,
   STATUS_LABELS,
@@ -38,7 +40,11 @@ export function TicketsTable({ rows }: { rows: TicketSummary[] }) {
       <tbody>
         {rows.map((ticket) => (
           <tr key={ticket.id} className="border-b last:border-0 hover:bg-gray-50">
-            <td className="py-2 pr-3 font-mono">{ticket.number}</td>
+            <td className="py-2 pr-3 font-mono">
+              <Link href={`/tickets/${ticket.id}`} className="text-blue-700 hover:underline">
+                {ticket.number}
+              </Link>
+            </td>
             <td className="py-2 pr-3">{ticket.subject}</td>
             <td className="py-2 pr-3">{label(STATUS_LABELS, ticket.status)}</td>
             <td className="py-2 pr-3">{label(PRIORITY_LABELS, ticket.priority)}</td>
