@@ -17,7 +17,7 @@ from api import __version__
 from api.config import get_settings
 from api.db import get_session
 from api.errors import ProblemException, problem_exception_handler
-from api.observability.health import check_database
+from api.observability.health import check_database, check_redis
 from api.observability.logging import configure_logging, get_logger
 from api.observability.metrics import MetricsMiddleware, metrics_response
 from api.observability.request_id import RequestIdMiddleware
@@ -59,7 +59,10 @@ def healthz() -> HealthzResponse:
 
 @app.get("/readyz", summary="Readiness probe", tags=["Infrastructure"])
 async def readyz(session: AsyncSession = Depends(get_session)) -> JSONResponse:
-    """Готовность к трафику: проверка БД (`SELECT 1`). Недоступна → 503."""
+    """Готовность к трафику: БД (`SELECT 1`) — обязательна, недоступна → 503.
+
+    Redis (кеш HTTP-клиентов, E3-2) — мягкий статус: его недоступность деградирует
+    кеш, но НЕ снимает готовность; отражается полем `redis` в теле ответа."""
     try:
         await check_database(session)
     except Exception:
@@ -68,7 +71,13 @@ async def readyz(session: AsyncSession = Depends(get_session)) -> JSONResponse:
             status_code=503,
             content={"status": "unavailable", "detail": "database unreachable"},
         )
-    return JSONResponse(status_code=200, content={"status": "ready"})
+    redis_ok = await check_redis(get_settings().redis_url)
+    if not redis_ok:
+        _logger.warning("readiness: redis unreachable (cache degraded, service still ready)")
+    return JSONResponse(
+        status_code=200,
+        content={"status": "ready", "redis": "ok" if redis_ok else "degraded"},
+    )
 
 
 @app.get("/metrics", summary="Prometheus metrics", tags=["Infrastructure"])
