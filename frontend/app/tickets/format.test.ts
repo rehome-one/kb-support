@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { STATUS_LABELS, formatDateTime, label, shortId } from "./format";
+import {
+  AUTHOR_TYPE_LABELS,
+  HISTORY_ACTION_LABELS,
+  STATUS_LABELS,
+  formatDateTime,
+  formatHistoryDiff,
+  label,
+  shortId,
+} from "./format";
 
 describe("label", () => {
   it("возвращает лейбл по карте", () => {
@@ -38,5 +46,39 @@ describe("shortId", () => {
 
   it("«—» для пустого", () => {
     expect(shortId(null)).toBe("—");
+  });
+});
+
+describe("доменные лейблы карточки", () => {
+  it("AUTHOR_TYPE_LABELS покрывает все значения AuthorType", () => {
+    expect(label(AUTHOR_TYPE_LABELS, "ai")).toBe("AI-ассистент");
+    expect(label(AUTHOR_TYPE_LABELS, "requester")).toBe("Заявитель");
+  });
+
+  it("HISTORY_ACTION_LABELS содержит 9 действий контракта", () => {
+    expect(Object.keys(HISTORY_ACTION_LABELS)).toHaveLength(9);
+    expect(label(HISTORY_ACTION_LABELS, "status_changed")).toBe("Смена статуса");
+  });
+});
+
+describe("formatHistoryDiff", () => {
+  it("created (from=null) → «→ …»", () => {
+    expect(formatHistoryDiff(null, { status: "NEW" })).toBe("→ status: NEW");
+  });
+
+  it("status_changed → «from → to»", () => {
+    expect(formatHistoryDiff({ status: "NEW" }, { status: "OPEN" })).toBe(
+      "status: NEW → status: OPEN",
+    );
+  });
+
+  it("message_added (служебный объект) форматируется без падения", () => {
+    expect(formatHistoryDiff(null, { message_id: "m1", is_internal: false })).toBe(
+      "→ message_id: m1, is_internal: false",
+    );
+  });
+
+  it("оба пустые → пустая строка", () => {
+    expect(formatHistoryDiff(null, null)).toBe("");
   });
 });
