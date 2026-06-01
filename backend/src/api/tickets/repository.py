@@ -8,11 +8,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import ColumnElement, and_, literal, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.principal import Principal
 from api.tickets.access import visibility_filter
-from api.tickets.enums import AccessLevel, TicketChannel, TicketPriority, TicketStatus
+from api.tickets.enums import AccessLevel, TicketChannel, TicketPriority, TicketStatus, TicketType
 from api.tickets.history import TicketHistoryAction, TicketHistoryRepository, record_changes
 from api.tickets.models import Ticket
 from api.tickets.numbering import generate_ticket_number
@@ -25,7 +26,7 @@ from api.tickets.pagination import (
     order_by_clause,
     row_cursor_value,
 )
-from api.tickets.schemas import TicketCreate, TicketUpdate
+from api.tickets.schemas import TicketCreate, TicketFromChat, TicketUpdate
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,28 @@ def apply_status_side_effects(ticket: Ticket, old_status: str) -> None:
         ticket.resolved_at = now
     elif ticket.status == TicketStatus.CLOSED.value:
         ticket.closed_at = now
+
+
+_CHAT_SUBJECT_FALLBACK = "Эскалация из AI-чата"
+
+
+def _derive_subject_from_transcript(payload: TicketFromChat) -> str:
+    """Тема, если не задана в payload: первая непустая реплика пользователя
+    (обрезка до 300), иначе фиксированный фолбэк. Без эвристик/генерации —
+    самопис доменной логики не вводим (CLAUDE.md)."""
+    for turn in payload.transcript or []:
+        text_value = turn.content.strip()
+        if turn.role == "user" and text_value:
+            return text_value[:300]
+    return _CHAT_SUBJECT_FALLBACK
+
+
+def _chat_custom_fields(payload: TicketFromChat) -> dict[str, Any]:
+    """custom_fields для заявки из чата: transcript как вспомогательный контекст
+    оператора. Пусто, если transcript не передан."""
+    if not payload.transcript:
+        return {}
+    return {"chat_transcript": [turn.model_dump(mode="json") for turn in payload.transcript]}
 
 
 class TicketRepository:
@@ -107,6 +130,77 @@ class TicketRepository:
             to_value={"status": ticket.status},
         )
         return ticket
+
+    async def find_active_by_chat_session(self, chat_session_id: uuid.UUID) -> Ticket | None:
+        """Активная (не CLOSED) заявка для chat-сессии, в обход visibility-filter.
+
+        Дедуп эскалаций — это m2m-операция (SERVICE-принципал), а не чтение
+        оператором: visibility_filter здесь НЕ применяется (для SERVICE он отдал
+        бы пусто и дедуп молча сломался бы). Закрытые заявки не считаются —
+        повторная эскалация после закрытия создаёт новую (см. частичный uniq).
+        """
+        stmt = (
+            select(Ticket)
+            .where(
+                Ticket.chat_session_id == chat_session_id,
+                Ticket.status != TicketStatus.CLOSED.value,
+            )
+            .order_by(Ticket.created_at.desc())
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalars().first()
+
+    async def create_from_chat(
+        self, payload: TicketFromChat, principal: Principal
+    ) -> tuple[Ticket, bool]:
+        """Создать заявку из эскалации AI-чата (kb-search → m2m). Возвращает
+        `(ticket, created)`: при повторной эскалации той же сессии — существующую
+        активную заявку и `created=False` (идемпотентность).
+
+        `requester_id` берётся ИЗ payload (m2m-вызов, принципал — SERVICE);
+        `channel` форсирован AI_CHAT; transcript кладётся в `custom_fields`.
+        """
+        existing = await self.find_active_by_chat_session(payload.chat_session_id)
+        if existing is not None:
+            return existing, False
+
+        ticket = Ticket(
+            number=await generate_ticket_number(self._session),
+            subject=payload.subject or _derive_subject_from_transcript(payload),
+            # description NOT NULL в модели — задаём явно (transcript хранится в
+            # custom_fields, не дублируется в description).
+            description="",
+            type=(payload.type or TicketType.OTHER).value,
+            status=TicketStatus.NEW.value,
+            priority=TicketPriority.NORMAL.value,
+            channel=TicketChannel.AI_CHAT.value,
+            access_level=AccessLevel.LOGGED.value,
+            requester_id=payload.requester_id,
+            premises_id=payload.premises_id,
+            booking_id=payload.booking_id,
+            chat_session_id=payload.chat_session_id,
+            tags=[],
+            custom_fields=_chat_custom_fields(payload),
+        )
+        self._session.add(ticket)
+        try:
+            await self._session.flush()
+        except IntegrityError:
+            # Гонка: параллельная эскалация той же сессии успела создать заявку
+            # (частичный uniq отклонил нашу). Откат + возврат победившей.
+            await self._session.rollback()
+            existing = await self.find_active_by_chat_session(payload.chat_session_id)
+            if existing is None:  # pragma: no cover — теоретически недостижимо
+                raise
+            return existing, False
+
+        await self._history.record(
+            ticket.id,
+            principal.user_id,
+            TicketHistoryAction.CREATED,
+            to_value={"status": ticket.status},
+        )
+        return ticket, True
 
     async def get_for_principal(self, ticket_id: uuid.UUID, principal: Principal) -> Ticket | None:
         """Вернуть заявку, если она видима субъекту, иначе None (→ 404)."""

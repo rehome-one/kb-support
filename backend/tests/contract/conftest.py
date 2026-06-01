@@ -95,6 +95,31 @@ def operator_client() -> Iterator[TestClient]:
 
 
 @pytest.fixture
+def service_client() -> Iterator[TestClient]:
+    """TestClient с m2m (SERVICE) принципалом — для /from-chat (E3-1, #69)."""
+    engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def _session() -> Any:
+        async with factory() as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+
+    service = Principal(user_id=uuid.uuid4(), kind=PrincipalKind.SERVICE)
+    app.dependency_overrides[get_session] = _session
+    app.dependency_overrides[get_current_principal] = lambda: service
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        app.dependency_overrides.clear()
+        asyncio.run(engine.dispose())
+
+
+@pytest.fixture
 def prism_mock() -> Iterator[str]:
     """Prism mock-сервер из docs/openapi.yaml (env-gated `RUN_PRISM_CONTRACT=1`).
 

@@ -988,3 +988,120 @@ def test_operator_sees_ticket_of_own_team_only(client: TestClient) -> None:
         )
     )
     assert client.get(f"/api/v1/support/tickets/{ticket_id}").status_code == 404
+
+
+# --- from-chat ingest (E3-1, #69) ---
+
+_FROM_CHAT_PATH = "/api/v1/support/tickets/from-chat"
+
+
+def _service() -> Principal:
+    """m2m-принципал (kb-search) для эскалации из чата."""
+    return Principal(user_id=uuid.uuid4(), kind=PrincipalKind.SERVICE)
+
+
+def _from_chat(client: TestClient, **extra: object) -> Response:
+    payload: dict[str, object] = {
+        "chat_session_id": str(uuid.uuid4()),
+        "requester_id": str(uuid.uuid4()),
+        **extra,
+    }
+    return client.post(_FROM_CHAT_PATH, json=payload)
+
+
+def _ticket_history_actions(ticket_id: str) -> list[str]:
+    """Журнал заявки напрямую из БД (endpoint /history требует видимости команды)."""
+
+    async def _inner() -> list[str]:
+        engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+        try:
+            async with engine.connect() as conn:
+                rows = await conn.execute(
+                    text("SELECT action FROM ticket_history WHERE ticket_id = :id"),
+                    {"id": uuid.UUID(ticket_id)},
+                )
+                return [r[0] for r in rows]
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_inner())
+
+
+def test_from_chat_creates_ai_channel_ticket(client: TestClient) -> None:
+    _use(_service())
+    requester = str(uuid.uuid4())
+    resp = _from_chat(
+        client,
+        requester_id=requester,
+        transcript=[{"role": "user", "content": "Не приходит чек"}],
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()["data"]
+    assert data["channel"] == "AI_CHAT"
+    assert data["status"] == "NEW"
+    # requester_id — из тела (m2m), не из принципала.
+    assert data["requester_id"] == requester
+    assert data["chat_session_id"] is not None
+    # subject выведен из первой реплики пользователя.
+    assert data["subject"] == "Не приходит чек"
+    # CREATED записан в журнал.
+    assert "created" in _ticket_history_actions(data["id"])
+
+
+def test_from_chat_persists_transcript_in_custom_fields(client: TestClient) -> None:
+    _use(_service())
+    resp = _from_chat(
+        client,
+        subject="Тема задана",
+        transcript=[
+            {"role": "user", "content": "вопрос"},
+            {"role": "assistant", "content": "ответ бота"},
+        ],
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()["data"]
+    assert data["subject"] == "Тема задана"
+    transcript = data["custom_fields"]["chat_transcript"]
+    assert [t["role"] for t in transcript] == ["user", "assistant"]
+
+
+def test_from_chat_dedup_same_session_returns_existing(client: TestClient) -> None:
+    _use(_service())
+    chat_session = str(uuid.uuid4())
+    first = _from_chat(client, chat_session_id=chat_session)
+    assert first.status_code == 201, first.text
+    second = _from_chat(client, chat_session_id=chat_session)
+    assert second.status_code == 201, second.text
+    # Повторная эскалация той же сессии — та же заявка, не дубль.
+    assert second.json()["data"]["id"] == first.json()["data"]["id"]
+
+
+def test_from_chat_subject_fallback_without_user_turn(client: TestClient) -> None:
+    _use(_service())
+    resp = _from_chat(client, transcript=[{"role": "assistant", "content": "только бот"}])
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["data"]["subject"] == "Эскалация из AI-чата"
+
+
+@pytest.mark.parametrize("kind", [PrincipalKind.REQUESTER, PrincipalKind.OPERATOR])
+def test_from_chat_forbidden_for_non_service(client: TestClient, kind: PrincipalKind) -> None:
+    # anti-spoofing: requester_id берётся из тела → endpoint только для m2m (SERVICE).
+    _use(Principal(user_id=uuid.uuid4(), kind=kind, teams=frozenset({TicketTeam.SUPPORT})))
+    resp = _from_chat(client, requester_id=str(uuid.uuid4()))
+    assert resp.status_code == 403, resp.text
+
+
+def test_from_chat_unauthenticated_returns_401(client: TestClient) -> None:
+    resp = client.post(
+        _FROM_CHAT_PATH,
+        json={"chat_session_id": str(uuid.uuid4()), "requester_id": str(uuid.uuid4())},
+    )
+    assert resp.status_code == 401
+
+
+def test_from_chat_transcript_over_limit_returns_422(client: TestClient) -> None:
+    _use(_service())
+    limit = get_settings().chat_transcript_max_turns
+    transcript = [{"role": "user", "content": f"m{i}"} for i in range(limit + 1)]
+    resp = _from_chat(client, transcript=transcript)
+    assert resp.status_code == 422, resp.text

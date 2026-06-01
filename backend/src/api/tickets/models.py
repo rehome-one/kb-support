@@ -39,6 +39,16 @@ class Ticket(TimestampMixin, Base):
         Index("ix_tickets_requester_id", "requester_id"),
         Index("ix_tickets_assignee_id", "assignee_id"),
         Index("ix_tickets_status_created_at", "status", "created_at"),
+        # Частичный uniq: не более одной АКТИВНОЙ (не CLOSED) заявки на chat_session_id
+        # — идемпотентность эскалации из чата + защита от гонки параллельных вызовов
+        # (E3-1, #69). Re-эскалация после закрытия разрешена (status='CLOSED' вне
+        # индекса). Служит и быстрым lookup'ом для дедупа.
+        Index(
+            "uq_tickets_active_chat_session",
+            "chat_session_id",
+            unique=True,
+            postgresql_where=text("chat_session_id IS NOT NULL AND status <> 'CLOSED'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(), primary_key=True, default=uuid.uuid4)

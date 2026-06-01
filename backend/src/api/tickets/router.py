@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal, PrincipalKind
+from api.config import get_settings
 from api.db import get_session
 from api.errors import ProblemException
 from api.tickets.actions import TicketActionService
@@ -38,6 +39,7 @@ from api.tickets.schemas import (
     ResolveInput,
     TicketCreate,
     TicketEnvelope,
+    TicketFromChat,
     TicketHistoryListEnvelope,
     TicketHistoryRead,
     TicketListEnvelope,
@@ -108,6 +110,33 @@ async def create_ticket(
         data=TicketRead.model_validate(ticket),
         request_id=_resolve_request_id(x_request_id),
     )
+
+
+@router.post(
+    "/from-chat",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TicketEnvelope,
+    summary="Создать заявку из эскалации AI-чата",
+)
+async def create_ticket_from_chat(
+    payload: TicketFromChat,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    # m2m-only (kb-search). requester_id берётся из тела, поэтому endpoint обязан
+    # быть закрыт для не-SERVICE принципалов — иначе заявитель создаст заявку от
+    # чужого имени (anti-spoofing, #69). Заголовок Idempotency-Key контракта
+    # информативен: идемпотентность обеспечивается дедупом по chat_session_id.
+    if principal.kind is not PrincipalKind.SERVICE:
+        raise ProblemException.forbidden(detail="Chat escalation is a service-to-service operation")
+    max_turns = get_settings().chat_transcript_max_turns
+    if payload.transcript is not None and len(payload.transcript) > max_turns:
+        raise ProblemException.unprocessable(detail=f"transcript exceeds {max_turns} turns")
+    ticket, _created = await TicketRepository(session).create_from_chat(payload, principal)
+    await session.commit()
+    await session.refresh(ticket)
+    return _ticket_envelope(ticket, x_request_id)
 
 
 @router.get("", response_model=TicketListEnvelope, summary="Список заявок")
