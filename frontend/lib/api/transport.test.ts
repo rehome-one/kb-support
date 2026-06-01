@@ -6,8 +6,8 @@ vi.mock("@/lib/server-token", () => ({ getServerAccessToken: vi.fn() }));
 
 import { apiFetch, UnauthenticatedError } from "@/lib/api/transport";
 
-// API base из vitest.setup.ts: https://kb-support.local/api/v1
-const BASE = "https://kb-support.local/api/v1";
+// API base из vitest.setup.ts (корень хоста); путь передаёт вызывающий.
+const BASE = "https://kb-support.local";
 
 const fetchSpy = () =>
   vi.fn<typeof fetch>(() => Promise.resolve(new Response("[]", { status: 200 })));

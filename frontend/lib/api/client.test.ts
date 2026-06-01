@@ -6,8 +6,8 @@ vi.mock("@/lib/server-token", () => ({ getServerAccessToken: vi.fn() }));
 
 import { ApiError, getTicket, listTickets, request, updateTicket } from "@/lib/api/client";
 
-// API base из vitest.setup.ts: https://kb-support.local/api/v1
-const BASE = "https://kb-support.local/api/v1";
+// API base из vitest.setup.ts (корень хоста); путь /api/v1 добавляют хелперы.
+const BASE = "https://kb-support.local";
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
