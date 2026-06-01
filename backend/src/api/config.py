@@ -78,6 +78,34 @@ class Settings(BaseSettings):
         default=300, ge=1, description="TTL кеша JWKS (сек) до принудительного рефреша."
     )
 
+    # --- HTTP-клиенты к соседям (AT-003, E3-2). Параметры resilience и кеша.
+    # Конкретные base-URL соседей задаются в их клиентах (#71/#72), не здесь. ---
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        description="URL Redis для кеша HTTP-клиентов (E3-2). Пусто/недоступен → кеш off.",
+    )
+    client_timeout_seconds: float = Field(
+        default=5.0, gt=0, description="Таймаут одного HTTP-вызова к соседу (сек)."
+    )
+    client_retry_attempts: int = Field(
+        default=3, ge=1, le=10, description="Всего попыток вызова (включая первую)."
+    )
+    client_retry_base_delay: float = Field(
+        default=0.1, gt=0, description="Базовая задержка backoff (сек): base * 2**(n-1)."
+    )
+    client_retry_max_delay: float = Field(
+        default=2.0, gt=0, description="Потолок задержки backoff (сек)."
+    )
+    client_breaker_failure_threshold: int = Field(
+        default=5, ge=1, description="Подряд ошибок до открытия circuit breaker."
+    )
+    client_breaker_reset_timeout: float = Field(
+        default=30.0, gt=0, description="Сек до перехода OPEN → HALF_OPEN (пробный вызов)."
+    )
+    client_cache_ttl_seconds: int = Field(
+        default=60, ge=1, description="TTL по умолчанию для кеша ответов соседей (сек)."
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

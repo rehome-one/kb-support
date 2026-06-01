@@ -23,6 +23,9 @@ dependencies = [
     "prometheus-client>=0.21,<0.22",
     # Верификация Keycloak Bearer JWT (RS256/JWKS) — #29. [crypto] тянет cryptography.
     "pyjwt[crypto]>=2.8,<3",
+    # Redis-кеш HTTP-клиентов к соседям (AT-003, E3-2). Часть утверждённого стека
+    # (CLAUDE.md, ADR-0005 Решение 1, ADR-0006) — не новый сервис. Async: redis.asyncio.
+    "redis>=5,<6",
 ]
 
 [project.optional-dependencies]
