@@ -43,7 +43,12 @@ export function TicketsTable({ rows }: { rows: TicketSummary[] }) {
             <td className="py-2 pr-3">{label(STATUS_LABELS, ticket.status)}</td>
             <td className="py-2 pr-3">{label(PRIORITY_LABELS, ticket.priority)}</td>
             <td className="py-2 pr-3">{label(TYPE_LABELS, ticket.type)}</td>
-            <td className="py-2 pr-3 font-mono text-gray-600">{shortId(ticket.assignee_id)}</td>
+            <td
+              className="py-2 pr-3 font-mono text-gray-600"
+              title={ticket.assignee_id ?? undefined}
+            >
+              {shortId(ticket.assignee_id)}
+            </td>
             <td className="py-2 pr-3">{label(TEAM_LABELS, ticket.team)}</td>
             <td className="py-2 pr-3 whitespace-nowrap text-gray-600">
               {formatDateTime(ticket.created_at)}

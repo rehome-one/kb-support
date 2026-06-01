@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import { TicketFilters } from "./TicketFilters";
 import { TicketsTable } from "./TicketsTable";
-import { queryKey, toSearchString } from "./query";
+import { toSearchString } from "./query";
 import type { ListTicketsQuery, LoadResult, TicketSummary } from "./types";
 
 interface Props {
@@ -40,25 +40,20 @@ export function TicketsView({ query, initial, loadMore }: Props) {
     initial.ok ? null : { title: initial.title, unauthenticated: initial.unauthenticated },
   );
 
-  // Ключ применённых фильтров: ответ «load more» отбрасывается, если за время
-  // запроса ключ изменился (anti-stale). Без cursor/limit.
-  const appliedKey = queryKey(query);
-  const reqKeyRef = useRef(appliedKey);
-  reqKeyRef.current = appliedKey;
-
   const applyFilters = (next: ListTicketsQuery) => {
     const qs = toSearchString(next);
+    // Смена фильтров идёт через URL: Server Component перезагружает первую
+    // страницу, а remount по key={queryKey} в page.tsx пересоздаёт этот
+    // компонент со свежим состоянием — устаревший «load more» отбрасывается
+    // вместе со старым инстансом, отдельный anti-stale guard не нужен.
     router.replace(qs ? `${pathname}?${qs}` : pathname);
   };
 
   const handleLoadMore = async () => {
     if (loading || !hasMore || !cursor) return;
-    const keyAtRequest = reqKeyRef.current;
     setLoading(true);
     setError(null);
     const result = await loadMore({ ...query, cursor });
-    // Фильтры сменились за время запроса — результат устарел, игнорируем.
-    if (reqKeyRef.current !== keyAtRequest) return;
     setLoading(false);
     if (result.ok) {
       setRows((prev) => dedupeAppend(prev, result.rows));
