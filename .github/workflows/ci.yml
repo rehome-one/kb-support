@@ -209,6 +209,12 @@ jobs:
         working-directory: frontend
         run: npm test -- --run
 
+      - name: Build
+        # Ловит регрессию production/standalone-сборки в быстром gate (#53).
+        if: steps.check.outputs.exists == 'true'
+        working-directory: frontend
+        run: npm run build
+
   # ============================================================
   # Frontend E2E (Playwright): сквозной smoke рабочего места
   # оператора (#49, E2-8). Самодостаточен: детерминированный
