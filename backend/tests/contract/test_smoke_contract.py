@@ -47,6 +47,24 @@ def test_create_ticket_response_conforms(operator_client: TestClient) -> None:
     assert_response_conforms("/api/v1/support/tickets", "post", "201", resp.json())
 
 
+@requires_postgres
+def test_ticket_history_response_conforms(operator_client: TestClient) -> None:
+    """Drift-детектор: реальный ответ GET /{id}/history соответствует TicketHistory."""
+    # Создание заявки пишет неизменяемую строку журнала `created` → history непуст,
+    # что позволяет провалидировать элемент TicketHistory (включая from_value: null).
+    created = operator_client.post(
+        "/api/v1/support/tickets", json={"subject": "history", "type": "PAYMENT"}
+    )
+    assert created.status_code == 201
+    ticket_id = created.json()["data"]["id"]
+
+    resp = operator_client.get(f"/api/v1/support/tickets/{ticket_id}/history")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data"], "ожидалась ≥1 строка журнала (created) для валидации TicketHistory"
+    assert_response_conforms("/api/v1/support/tickets/{id}/history", "get", "200", body)
+
+
 def test_prism_mock_serves_tickets(prism_mock: str) -> None:
     """Опционально (RUN_PRISM_CONTRACT=1): Prism mock из спеки отдаёт валидный ответ."""
     resp = httpx.get(

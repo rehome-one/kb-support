@@ -4,7 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 // инжектируем в хелперы через deps.
 vi.mock("@/lib/server-token", () => ({ getServerAccessToken: vi.fn() }));
 
-import { ApiError, getTicket, listTickets, request, updateTicket } from "@/lib/api/client";
+import {
+  ApiError,
+  getTicket,
+  getTicketHistory,
+  listTickets,
+  request,
+  updateTicket,
+} from "@/lib/api/client";
 
 // API base из vitest.setup.ts (корень хоста); путь /api/v1 добавляют хелперы.
 const BASE = "https://kb-support.local";
@@ -49,6 +56,17 @@ describe("typed client — success", () => {
     expect(url).toBe(`${BASE}/api/v1/support/tickets/t1`);
     expect(init?.method).toBe("PATCH");
     expect(init?.body).toBe(JSON.stringify({ priority: "high" }));
+  });
+
+  it("getTicketHistory шлёт GET на /history и парсит конверт", async () => {
+    const d = deps(json({ data: [{ id: "h1", action: "created" }], request_id: "r1" }));
+    const result = await getTicketHistory("t1", d);
+
+    expect(result.data?.[0]?.action).toBe("created");
+    const [url, init] = d.fetchImpl.mock.calls[0];
+    expect(url).toBe(`${BASE}/api/v1/support/tickets/t1/history`);
+    expect(init?.method).toBe("GET");
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer tok");
   });
 });
 

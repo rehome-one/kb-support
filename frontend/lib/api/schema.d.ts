@@ -222,6 +222,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/support/tickets/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Журнал действий по заявке (внутренний)
+         * @description Неизменяемый журнал изменений заявки (§3.7). Только для операторов; заявителю — 403. Полный список без пагинации, в хронологическом порядке.
+         */
+        get: operations["getTicketHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/support/tickets/from-chat": {
         parameters: {
             query?: never;
@@ -615,6 +637,30 @@ export interface components {
              */
             is_internal: boolean;
             attachments?: string[];
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description Неизменяемая строка журнала действий по заявке (§3.7) */
+        TicketHistory: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            ticket_id: string;
+            /**
+             * Format: uuid
+             * @description Кто совершил действие (sub из токена)
+             */
+            actor_id: string;
+            /** @description Вид действия. Значения: created, status_changed, reassigned, priority_changed, type_changed, team_changed, tags_updated, message_added, rated */
+            action: string;
+            /** @description Значения до изменения в форме {"<поле>": <значение>}; null для события created */
+            from_value?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description Значения после изменения в форме {"<поле>": <значение>} */
+            to_value?: {
+                [key: string]: unknown;
+            } | null;
             /** Format: date-time */
             created_at: string;
         };
@@ -1379,6 +1425,32 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getTicketHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["TicketHistory"][];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     createTicketFromChat: {
