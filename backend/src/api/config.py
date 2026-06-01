@@ -106,6 +106,24 @@ class Settings(BaseSettings):
         default=60, ge=1, description="TTL по умолчанию для кеша ответов соседей (сек)."
     )
 
+    # --- rehome.one platform API (E3-3, #71). Провизорный контракт ADR-0006. ---
+    platform_api_base_url: str = Field(
+        default="http://localhost:8081",
+        description="Базовый URL rehome.one platform API (контекст заявителя).",
+    )
+    platform_api_token: str = Field(
+        default="",
+        description=(
+            "Плейсхолдер m2m-токена для StaticTokenProvider (dev/test). Реальный "
+            "ClientCredentials провайдер — #77 (ждёт провижининга realm)."
+        ),
+    )
+    platform_cache_ttl_seconds: int = Field(
+        default=300,
+        ge=1,
+        description="TTL кеша справочных данных платформы (сек). Read-only, ПДн.",
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
