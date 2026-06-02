@@ -16,6 +16,7 @@
 | [0004](0004-collaborators-model.md) | Модель коллаборантов | Принят (2026-05) | **Reference-копия** из rehome-kb-platform на момент bootstrap'а kb-support |
 | [0005](0005-support-module.md) | Модуль службы поддержки (5 решений) | **Принят** (2026-05) | Главный ADR kb-support |
 | [0006](0006-platform-and-chat-contracts.md) | Провизорные контракты platform API + возврат ответа в kb-search (E3) | **Принят** (2026-06-01) | Разблокирует TD-PA-001 для E3 (#68) |
+| [0007](0007-sla-timers.md) | Стратегия SLA-таймеров, учёта пауз и business hours (E4) | **Принят** (2026-06-02) | Фиксирует 4 решения перед стартом E4 (#84) |
 
 ## Про reference-копии
 
