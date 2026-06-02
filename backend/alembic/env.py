@@ -15,6 +15,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+import api.sla.models  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
 import api.tickets.history  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
 import api.tickets.messages  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
 import api.tickets.models  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
