@@ -2,7 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { OperatorHeader } from "@/app/components/OperatorHeader";
-import { ApiError, getTicket, getTicketHistory, listMessages } from "@/lib/api/client";
+import {
+  ApiError,
+  getRequesterContext,
+  getTicket,
+  getTicketHistory,
+  listMessages,
+} from "@/lib/api/client";
 
 import {
   assignAction,
@@ -19,7 +25,7 @@ import { MessageThread } from "./MessageThread";
 import { RequesterContext } from "./RequesterContext";
 import { TicketActions } from "./TicketActions";
 import { TicketDetail } from "./TicketDetail";
-import type { TicketHistoryEntry, TicketMessage } from "./types";
+import type { RequesterContextResult, TicketHistoryEntry, TicketMessage } from "./types";
 
 type MessagesResult = { items: TicketMessage[] } | { error: string };
 type HistoryResult = { items: TicketHistoryEntry[] } | { forbidden: true } | { error: string };
@@ -44,6 +50,20 @@ async function loadHistory(id: string): Promise<HistoryResult> {
       return { forbidden: true };
     }
     return { error: "Не удалось загрузить историю" };
+  }
+}
+
+async function loadRequesterContext(id: string): Promise<RequesterContextResult> {
+  try {
+    const res = await getRequesterContext(id);
+    // 200 контракта всегда несёт data; на всякий случай — деградируем мягко.
+    return res.data ? { context: res.data } : { error: "Контекст заявителя недоступен" };
+  } catch (error) {
+    // 403 (контекст — только операторам, #81) — отдельная нейтральная ветка, как история.
+    if (error instanceof ApiError && error.status === 403) {
+      return { forbidden: true };
+    }
+    return { error: "Не удалось загрузить контекст заявителя" };
   }
 }
 
@@ -86,7 +106,11 @@ export default async function TicketCardPage({ params }: { params: { id: string 
   }
   if (!ticket) notFound();
 
-  const [messages, history] = await Promise.all([loadMessages(id), loadHistory(id)]);
+  const [messages, history, requesterContext] = await Promise.all([
+    loadMessages(id),
+    loadHistory(id),
+    loadRequesterContext(id),
+  ]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-6 p-8">
@@ -105,7 +129,7 @@ export default async function TicketCardPage({ params }: { params: { id: string 
         closeAction={closeAction}
         reopenAction={reopenAction}
       />
-      <RequesterContext ticket={ticket} />
+      <RequesterContext ticket={ticket} result={requesterContext} />
 
       <Section title="Переписка">
         {"error" in messages ? (

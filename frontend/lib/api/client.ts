@@ -50,6 +50,7 @@ export type TicketListResponse = OkJson<"listTickets", 200>;
 export type TicketResponse = OkJson<"getTicket", 200>;
 export type MessageListResponse = OkJson<"listMessages", 200>;
 export type TicketHistoryListResponse = OkJson<"getTicketHistory", 200>;
+export type RequesterContextResponse = OkJson<"getRequesterContext", 200>;
 export type MessageResponse = OkJson<"createMessage", 201>;
 export type ListTicketsQuery = NonNullable<operations["listTickets"]["parameters"]["query"]>;
 export type ListMessagesQuery = NonNullable<operations["listMessages"]["parameters"]["query"]>;
@@ -180,6 +181,13 @@ export function getTicketHistory(
   deps?: ApiFetchDeps,
 ): Promise<TicketHistoryListResponse> {
   return request<TicketHistoryListResponse>(`${ticketPath(id)}/history`, "GET", { deps });
+}
+
+export function getRequesterContext(
+  id: string,
+  deps?: ApiFetchDeps,
+): Promise<RequesterContextResponse> {
+  return request<RequesterContextResponse>(`${ticketPath(id)}/requester-context`, "GET", { deps });
 }
 
 export function createMessage(

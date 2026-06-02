@@ -94,6 +94,62 @@ export function shortId(id: string | null | undefined): string {
   return id.length > 8 ? id.slice(0, 8) : id;
 }
 
+// Дата без времени (период брони — date, не datetime).
+const DATE_ONLY_FORMAT = new Intl.DateTimeFormat("ru-RU", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  timeZone: "Europe/Moscow",
+});
+
+/** Форматирует ISO-дату в `дд.мм.гггг` (МСК). Невалидную/пустую — «—»/как есть. */
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return DATE_ONLY_FORMAT.format(date);
+}
+
+/** Сумма в рублях (RU-разделители). `null/undefined` → «—». */
+export function formatMoney(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  return `${new Intl.NumberFormat("ru-RU").format(value)} ₽`;
+}
+
+// --- Лейблы полей контекста заявителя (platform, #81/#73). В отличие от карт выше,
+// домен задаётся rehome.one platform (провизорный контракт ADR-0006), а не нашим
+// OpenAPI — значения не фиксированы, поэтому `label()` корректно фолбэчит на сырую
+// строку при промахе (не теряем данные оператору).
+export const USER_ROLE_LABELS: Record<string, string> = {
+  tenant: "Наниматель",
+  landlord: "Наймодатель",
+  operator: "Оператор",
+  admin: "Администратор",
+};
+
+export const PREMISES_KIND_LABELS: Record<string, string> = {
+  apartment: "Квартира",
+  room: "Комната",
+  house: "Дом",
+  studio: "Студия",
+};
+
+export const BOOKING_STATUS_LABELS: Record<string, string> = {
+  draft: "Черновик",
+  pending: "Ожидает",
+  active: "Активна",
+  completed: "Завершена",
+  cancelled: "Отменена",
+};
+
+export const COLLABORATOR_CATEGORY_LABELS: Record<string, string> = {
+  cleaning: "Клининг",
+  insurance: "Страхование",
+  bank: "Банк",
+  repair: "Ремонт",
+  legal: "Юр. услуги",
+};
+
 export const AUTHOR_TYPE_LABELS: Record<string, string> = {
   requester: "Заявитель",
   operator: "Оператор",
