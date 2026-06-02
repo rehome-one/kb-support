@@ -14,6 +14,7 @@ import enum
 import uuid
 from dataclasses import dataclass, field
 
+from api.auth.scopes import STAFF_ADMIN_SCOPE
 from api.tickets.enums import TicketTeam
 
 
@@ -47,3 +48,11 @@ class Principal:
     def is_operator(self) -> bool:
         """Является ли субъект оператором (доступ к заявкам по командам)."""
         return self.kind is PrincipalKind.OPERATOR
+
+    @property
+    def is_staff_admin(self) -> bool:
+        """Есть ли у субъекта админ-скоуп (настройка SLA/business hours, §6).
+
+        Гранулярное право из проверенного токена — не привязано к `kind` (оператор
+        с этим скоупом администрирует конфигурацию; см. `auth/scopes.py`)."""
+        return STAFF_ADMIN_SCOPE in self.scopes

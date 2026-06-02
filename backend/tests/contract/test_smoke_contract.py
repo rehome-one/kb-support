@@ -220,6 +220,83 @@ def test_requester_context_populated_response_conforms(operator_client: TestClie
     )
 
 
+@requires_postgres
+def test_business_hours_responses_conform(admin_client: TestClient) -> None:
+    """AT-002: create/get/list business-hours соответствуют схеме BusinessHours (#86)."""
+    create = admin_client.post(
+        "/api/v1/support/business-hours",
+        json={
+            "name": "contract",
+            "timezone": "Europe/Moscow",
+            "schedule": {"mon": [["09:00", "18:00"]]},
+        },
+    )
+    assert create.status_code == 201, create.text
+    assert_response_conforms("/api/v1/support/business-hours", "post", "201", create.json())
+    bh_id = create.json()["data"]["id"]
+
+    got = admin_client.get(f"/api/v1/support/business-hours/{bh_id}")
+    assert got.status_code == 200
+    assert_response_conforms("/api/v1/support/business-hours/{id}", "get", "200", got.json())
+
+    patched = admin_client.patch(
+        f"/api/v1/support/business-hours/{bh_id}", json={"is_active": False}
+    )
+    assert patched.status_code == 200
+    assert_response_conforms("/api/v1/support/business-hours/{id}", "patch", "200", patched.json())
+
+    listed = admin_client.get("/api/v1/support/business-hours")
+    assert listed.status_code == 200
+    assert_response_conforms("/api/v1/support/business-hours", "get", "200", listed.json())
+
+    # Пустой дефолт schedule={} тоже должен конформить BusinessHours (drift пустых веток).
+    empty = admin_client.post(
+        "/api/v1/support/business-hours", json={"name": "empty", "timezone": "UTC"}
+    )
+    assert empty.status_code == 201
+    assert empty.json()["data"]["schedule"] == {}
+    assert_response_conforms("/api/v1/support/business-hours", "post", "201", empty.json())
+
+
+@requires_postgres
+def test_sla_policy_responses_conform(admin_client: TestClient) -> None:
+    """AT-002: create/get/update/list sla-policies соответствуют схеме SLAPolicy (#86)."""
+    create = admin_client.post(
+        "/api/v1/support/sla-policies",
+        json={
+            "name": "contract policy",
+            "applies_to": {"types": ["PAYMENT"]},
+            "first_response_minutes": 30,
+            "resolution_minutes": 240,
+            "priority": 5,
+        },
+    )
+    assert create.status_code == 201, create.text
+    assert_response_conforms("/api/v1/support/sla-policies", "post", "201", create.json())
+    policy_id = create.json()["data"]["id"]
+
+    got = admin_client.get(f"/api/v1/support/sla-policies/{policy_id}")
+    assert got.status_code == 200
+    assert_response_conforms("/api/v1/support/sla-policies/{id}", "get", "200", got.json())
+
+    patched = admin_client.patch(f"/api/v1/support/sla-policies/{policy_id}", json={"priority": 7})
+    assert patched.status_code == 200
+    assert_response_conforms("/api/v1/support/sla-policies/{id}", "patch", "200", patched.json())
+
+    listed = admin_client.get("/api/v1/support/sla-policies")
+    assert listed.status_code == 200
+    assert_response_conforms("/api/v1/support/sla-policies", "get", "200", listed.json())
+
+    # Дефолтный applies_to ({}) тоже должен конформить SLAPolicy/SLAAppliesTo.
+    minimal = admin_client.post(
+        "/api/v1/support/sla-policies",
+        json={"name": "minimal", "first_response_minutes": 60, "resolution_minutes": 480},
+    )
+    assert minimal.status_code == 201
+    assert minimal.json()["data"]["applies_to"] == {}
+    assert_response_conforms("/api/v1/support/sla-policies", "post", "201", minimal.json())
+
+
 def test_prism_mock_serves_tickets(prism_mock: str) -> None:
     """Опционально (RUN_PRISM_CONTRACT=1): Prism mock из спеки отдаёт валидный ответ."""
     resp = httpx.get(

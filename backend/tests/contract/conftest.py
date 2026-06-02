@@ -17,6 +17,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from sqlalchemy.pool import NullPool
 
 from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal, PrincipalKind
+from api.auth.scopes import STAFF_ADMIN_SCOPE
 from api.config import get_settings
 from api.db import get_session
 from api.main import app
@@ -63,9 +65,12 @@ def assert_response_conforms(path: str, method: str, status: str, body: object) 
     Draft202012Validator({"$ref": ref}, registry=_REGISTRY).validate(body)
 
 
-@pytest.fixture
-def operator_client() -> Iterator[TestClient]:
-    """TestClient с инжектированным оператором и NullPool-сессией к тестовой БД."""
+@contextmanager
+def _testclient_with(principal: Principal) -> Iterator[TestClient]:
+    """TestClient с инжектированным принципалом и NullPool-сессией к тестовой БД.
+
+    NullPool открывает свежее соединение на текущем event loop (глобальный
+    QueuePool кешировал бы соединение первого loop → cross-loop ошибки)."""
     engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -77,6 +82,19 @@ def operator_client() -> Iterator[TestClient]:
                 await session.rollback()
                 raise
 
+    app.dependency_overrides[get_session] = _session
+    app.dependency_overrides[get_current_principal] = lambda: principal
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        app.dependency_overrides.clear()
+        asyncio.run(engine.dispose())
+
+
+@pytest.fixture
+def operator_client() -> Iterator[TestClient]:
+    """TestClient с инжектированным оператором (без admin-скоупа)."""
     # Стабильный оператор на время фикстуры: POST и GET должны идти от ОДНОГО
     # субъекта, иначе созданная заявка не видна в списке (он владелец).
     operator = Principal(
@@ -84,39 +102,28 @@ def operator_client() -> Iterator[TestClient]:
         kind=PrincipalKind.OPERATOR,
         teams=frozenset({TicketTeam.SUPPORT}),
     )
-    app.dependency_overrides[get_session] = _session
-    app.dependency_overrides[get_current_principal] = lambda: operator
-    try:
-        with TestClient(app) as client:
-            yield client
-    finally:
-        app.dependency_overrides.clear()
-        asyncio.run(engine.dispose())
+    with _testclient_with(operator) as client:
+        yield client
 
 
 @pytest.fixture
 def service_client() -> Iterator[TestClient]:
     """TestClient с m2m (SERVICE) принципалом — для /from-chat (E3-1, #69)."""
-    engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    with _testclient_with(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.SERVICE)) as client:
+        yield client
 
-    async def _session() -> Any:
-        async with factory() as session:
-            try:
-                yield session
-            except Exception:
-                await session.rollback()
-                raise
 
-    service = Principal(user_id=uuid.uuid4(), kind=PrincipalKind.SERVICE)
-    app.dependency_overrides[get_session] = _session
-    app.dependency_overrides[get_current_principal] = lambda: service
-    try:
-        with TestClient(app) as client:
-            yield client
-    finally:
-        app.dependency_overrides.clear()
-        asyncio.run(engine.dispose())
+@pytest.fixture
+def admin_client() -> Iterator[TestClient]:
+    """TestClient с админ-принципалом (оператор + `staff_admin`) — для SLA-конфигурации (#86)."""
+    admin = Principal(
+        user_id=uuid.uuid4(),
+        kind=PrincipalKind.OPERATOR,
+        scopes=frozenset({STAFF_ADMIN_SCOPE}),
+        teams=frozenset({TicketTeam.SUPPORT}),
+    )
+    with _testclient_with(admin) as client:
+        yield client
 
 
 @pytest.fixture

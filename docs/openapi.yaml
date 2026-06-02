@@ -857,10 +857,8 @@ paths:
       tags:
       - SLA
       summary: Список SLA-политик
+      description: scope=staff_admin. Включает неактивные политики (admin-конфигурация).
       operationId: listSLAPolicies
-      parameters:
-      - $ref: '#/components/parameters/Cursor'
-      - $ref: '#/components/parameters/Limit'
       responses:
         '200':
           description: OK
@@ -875,8 +873,10 @@ paths:
                       type: array
                       items:
                         $ref: '#/components/schemas/SLAPolicy'
-                    pagination:
-                      $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags:
       - SLA
@@ -903,8 +903,199 @@ paths:
                   properties:
                     data:
                       $ref: '#/components/schemas/SLAPolicy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/sla-policies/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - SLA
+      summary: SLA-политика
+      description: scope=staff_admin
+      operationId: getSLAPolicy
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SLAPolicy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - SLA
+      summary: Изменить SLA-политику
+      description: scope=staff_admin
+      operationId: updateSLAPolicy
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SLAPolicyUpdate'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SLAPolicy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/business-hours:
+    get:
+      tags:
+      - SLA
+      summary: Список графиков рабочего времени
+      description: scope=staff_admin. Включает неактивные графики.
+      operationId: listBusinessHours
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/BusinessHours'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - SLA
+      summary: Создать график рабочего времени
+      description: scope=staff_admin
+      operationId: createBusinessHours
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BusinessHoursInput'
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/BusinessHours'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/business-hours/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - SLA
+      summary: График рабочего времени
+      description: scope=staff_admin
+      operationId: getBusinessHours
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/BusinessHours'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - SLA
+      summary: Изменить график рабочего времени
+      description: scope=staff_admin
+      operationId: updateBusinessHours
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BusinessHoursUpdate'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/BusinessHours'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/support/automation-rules:
@@ -1902,13 +2093,35 @@ components:
           $ref: '#/components/schemas/TicketType'
         linked_article_slug:
           type: string
+    SLAAppliesTo:
+      type: object
+      additionalProperties: false
+      description: Условия применения SLA-политики (пустой объект = применима ко всем)
+      properties:
+        types:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketType'
+        priorities:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketPriority'
+        requester_roles:
+          type: array
+          items:
+            type: string
     SLAPolicy:
       type: object
       required:
       - id
       - name
+      - applies_to
       - first_response_minutes
       - resolution_minutes
+      - priority
+      - is_active
+      - created_at
+      - updated_at
       properties:
         id:
           type: string
@@ -1916,21 +2129,7 @@ components:
         name:
           type: string
         applies_to:
-          type: object
-          description: Условия применения
-          properties:
-            types:
-              type: array
-              items:
-                $ref: '#/components/schemas/TicketType'
-            priorities:
-              type: array
-              items:
-                $ref: '#/components/schemas/TicketPriority'
-            requester_roles:
-              type: array
-              items:
-                type: string
+          $ref: '#/components/schemas/SLAAppliesTo'
         first_response_minutes:
           type: integer
         resolution_minutes:
@@ -1940,12 +2139,21 @@ components:
           - string
           - 'null'
           format: uuid
-          description: График (рабочие часы / 24-7)
+          description: График (рабочие часы / 24-7 при null)
         priority:
           type: integer
           description: Приоритет применения при пересечении условий
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     SLAPolicyInput:
       type: object
+      additionalProperties: false
       required:
       - name
       - first_response_minutes
@@ -1954,17 +2162,128 @@ components:
         name:
           type: string
         applies_to:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/SLAAppliesTo'
         first_response_minutes:
           type: integer
         resolution_minutes:
           type: integer
         business_hours_id:
-          type: string
+          type:
+          - string
+          - 'null'
           format: uuid
         priority:
           type: integer
+    SLAPolicyUpdate:
+      type: object
+      additionalProperties: false
+      description: Частичное обновление SLA-политики (переданные поля)
+      properties:
+        name:
+          type: string
+        applies_to:
+          $ref: '#/components/schemas/SLAAppliesTo'
+        first_response_minutes:
+          type: integer
+        resolution_minutes:
+          type: integer
+        business_hours_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        priority:
+          type: integer
+        is_active:
+          type: boolean
+    WeeklySchedule:
+      type: object
+      additionalProperties: false
+      description: >-
+        Недельный график: день → массив интервалов рабочего времени. Интервал —
+        пара ["HH:MM", "HH:MM"] (24ч, open < close). Отсутствующий день или
+        пустой массив = выходной.
+      properties:
+        mon:
+          $ref: '#/components/schemas/DayIntervals'
+        tue:
+          $ref: '#/components/schemas/DayIntervals'
+        wed:
+          $ref: '#/components/schemas/DayIntervals'
+        thu:
+          $ref: '#/components/schemas/DayIntervals'
+        fri:
+          $ref: '#/components/schemas/DayIntervals'
+        sat:
+          $ref: '#/components/schemas/DayIntervals'
+        sun:
+          $ref: '#/components/schemas/DayIntervals'
+    DayIntervals:
+      type: array
+      description: Интервалы рабочего времени за день
+      items:
+        type: array
+        minItems: 2
+        maxItems: 2
+        items:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+    BusinessHours:
+      type: object
+      required:
+      - id
+      - name
+      - timezone
+      - schedule
+      - is_active
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        timezone:
+          type: string
+          description: IANA-таймзона (напр. Europe/Moscow)
+        schedule:
+          $ref: '#/components/schemas/WeeklySchedule'
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    BusinessHoursInput:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - timezone
+      properties:
+        name:
+          type: string
+        timezone:
+          type: string
+          description: IANA-таймзона (напр. Europe/Moscow)
+        schedule:
+          $ref: '#/components/schemas/WeeklySchedule'
+    BusinessHoursUpdate:
+      type: object
+      additionalProperties: false
+      description: Частичное обновление графика (переданные поля)
+      properties:
+        name:
+          type: string
+        timezone:
+          type: string
+        schedule:
+          $ref: '#/components/schemas/WeeklySchedule'
+        is_active:
+          type: boolean
     AutomationRule:
       type: object
       required:

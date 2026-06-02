@@ -21,6 +21,7 @@ from api.observability.health import check_database, check_redis
 from api.observability.logging import configure_logging, get_logger
 from api.observability.metrics import MetricsMiddleware, metrics_response
 from api.observability.request_id import RequestIdMiddleware
+from api.sla.router import router as sla_router
 from api.tickets.router import router as tickets_router
 
 configure_logging(get_settings().log_level)
@@ -38,6 +39,7 @@ app.add_exception_handler(ProblemException, problem_exception_handler)
 app.add_middleware(MetricsMiddleware)
 app.add_middleware(RequestIdMiddleware)
 app.include_router(tickets_router)
+app.include_router(sla_router)
 
 
 class HealthzResponse(BaseModel):
