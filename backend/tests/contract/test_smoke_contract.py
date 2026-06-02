@@ -151,28 +151,44 @@ def test_requester_context_populated_response_conforms(operator_client: TestClie
     class _FullClient:
         async def get_user(self, user_id: uuid.UUID) -> UserProfile:
             return UserProfile(
-                id=user_id, display_name="Заявитель", email="a@b.com", phone="+7",
-                role="tenant", is_active=True,
+                id=user_id,
+                display_name="Заявитель",
+                email="a@b.com",
+                phone="+7",
+                role="tenant",
+                is_active=True,
                 created_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
             )
 
         async def get_premises(self, premises_id: uuid.UUID) -> Premises:
             return Premises(
-                id=premises_id, address="СПб", kind="apartment", rooms=2, area_m2=54.0,
+                id=premises_id,
+                address="СПб",
+                kind="apartment",
+                rooms=2,
+                area_m2=54.0,
                 landlord_id=uuid.uuid4(),
             )
 
         async def get_booking(self, booking_id: uuid.UUID) -> Booking:
             return Booking(
-                id=booking_id, premises_id=premises_id, tenant_id=uuid.uuid4(),
-                landlord_id=uuid.uuid4(), status="active",
-                period_start=datetime.date(2026, 1, 1), period_end=None, monthly_rent=50000.0,
+                id=booking_id,
+                premises_id=premises_id,
+                tenant_id=uuid.uuid4(),
+                landlord_id=uuid.uuid4(),
+                status="active",
+                period_start=datetime.date(2026, 1, 1),
+                period_end=None,
+                monthly_rent=50000.0,
             )
 
         async def get_collaborator(self, collaborator_id: uuid.UUID) -> Collaborator:
             return Collaborator(
-                id=collaborator_id, name="Клининг", category="cleaning",
-                contact=Contact(email="c@d.com", phone=None), is_active=True,
+                id=collaborator_id,
+                name="Клининг",
+                category="cleaning",
+                contact=Contact(email="c@d.com", phone=None),
+                is_active=True,
             )
 
     # Без requester_id оператор сам заявитель → заявка ему видна; premises/booking
@@ -180,8 +196,10 @@ def test_requester_context_populated_response_conforms(operator_client: TestClie
     created = operator_client.post(
         "/api/v1/support/tickets",
         json={
-            "subject": "ctx-full", "type": "PAYMENT",
-            "premises_id": str(premises_id), "booking_id": str(uuid.uuid4()),
+            "subject": "ctx-full",
+            "type": "PAYMENT",
+            "premises_id": str(premises_id),
+            "booking_id": str(uuid.uuid4()),
         },
     )
     assert created.status_code == 201

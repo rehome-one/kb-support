@@ -38,22 +38,36 @@ def _user(uid: uuid.UUID) -> UserProfile:
 
 
 def _premises(pid: uuid.UUID) -> Premises:
-    return Premises(id=pid, address="СПб, Невский 1", kind="apartment", rooms=2, area_m2=54.0,
-                    landlord_id=uuid.uuid4())
+    return Premises(
+        id=pid,
+        address="СПб, Невский 1",
+        kind="apartment",
+        rooms=2,
+        area_m2=54.0,
+        landlord_id=uuid.uuid4(),
+    )
 
 
 def _booking(bid: uuid.UUID, pid: uuid.UUID) -> Booking:
     return Booking(
-        id=bid, premises_id=pid, tenant_id=uuid.uuid4(), landlord_id=uuid.uuid4(),
-        status="active", period_start=datetime.date(2026, 1, 1), period_end=None,
+        id=bid,
+        premises_id=pid,
+        tenant_id=uuid.uuid4(),
+        landlord_id=uuid.uuid4(),
+        status="active",
+        period_start=datetime.date(2026, 1, 1),
+        period_end=None,
         monthly_rent=50000.0,
     )
 
 
 def _collaborator(cid: uuid.UUID) -> Collaborator:
     return Collaborator(
-        id=cid, name="Клининг сервис", category="cleaning",
-        contact=Contact(email="clean@example.com", phone=None), is_active=True,
+        id=cid,
+        name="Клининг сервис",
+        category="cleaning",
+        contact=Contact(email="clean@example.com", phone=None),
+        is_active=True,
     )
 
 
@@ -112,7 +126,9 @@ class _Ticket:
 async def test_all_sections_populated() -> None:
     rid, pid, bid, cid = (uuid.uuid4() for _ in range(4))
     client = FakePlatformClient(
-        user=_user(rid), premises=_premises(pid), booking=_booking(bid, pid),
+        user=_user(rid),
+        premises=_premises(pid),
+        booking=_booking(bid, pid),
         collaborator=_collaborator(cid),
     )
     ticket = _Ticket(requester_id=rid, premises_id=pid, booking_id=bid, collaborator_id=cid)
