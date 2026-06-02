@@ -31,6 +31,7 @@ from api.tickets.enums import TicketStatus, TicketTeam, TicketType
 from api.tickets.history import TicketHistoryRepository, record_changes
 from api.tickets.models import Ticket
 from api.tickets.repository import TicketFilters, TicketRepository
+from api.tickets.requester_context import get_platform_client
 from api.tickets.schemas import TicketCreate
 from api.tickets.state_machine import ALLOWED_TRANSITIONS
 
@@ -1198,3 +1199,90 @@ def test_return_disabled_when_token_empty(
     resp = _post_message(client, ticket_id, "ответ", is_internal=False)
     assert resp.status_code == 201, resp.text
     assert captured == []
+
+
+# --- Контекст заявителя (enabler #81 для E3-5). FR-2.2, NFR-1.2, AT-003. ---
+
+_RC_PATH = "/api/v1/support/tickets/{}/requester-context"
+
+
+def _operator_in_team(team: TicketTeam) -> Principal:
+    return Principal(user_id=uuid.uuid4(), kind=PrincipalKind.OPERATOR, teams=frozenset({team}))
+
+
+def test_requester_context_gated_returns_degraded(client: TestClient) -> None:
+    """Дефолтные настройки (пустой platform_api_token) → 200, degraded=true, секции null."""
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    resp = client.get(_RC_PATH.format(ticket_id))
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["degraded"] is True
+    assert data["user"] is None
+    assert data["premises"] is None
+    assert data["booking"] is None
+    assert data["collaborator"] is None
+
+
+def test_requester_context_forbidden_for_requester(client: TestClient) -> None:
+    """NFR-1.2: заявитель по СВОЕЙ заявке не видит контекст (операторская функция) → 403."""
+    requester = uuid.uuid4()
+    _use(Principal(user_id=requester, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]  # owner = заявитель
+    resp = client.get(_RC_PATH.format(ticket_id))
+    assert resp.status_code == 403, resp.text
+
+
+def test_requester_context_not_found_for_stranger(client: TestClient) -> None:
+    """Anti-enumeration: посторонний (не владелец / не его команда) → 404, не 403."""
+    _use(_operator_in_team(TicketTeam.SUPPORT))
+    ticket_id = _create(client).json()["data"]["id"]  # команда не назначена
+    # Другой оператор другой команды — заявка ему не видна (storage-level фильтр).
+    _use(_operator_in_team(TicketTeam.LEGAL))
+    resp = client.get(_RC_PATH.format(ticket_id))
+    assert resp.status_code == 404, resp.text
+
+
+def test_requester_context_populated_from_platform(client: TestClient) -> None:
+    """Включённая интеграция (override клиента) → 200 с наполненной секцией user."""
+    import datetime
+
+    from api.clients.platform import UserProfile
+
+    class _FakeClient:
+        async def get_user(self, user_id: uuid.UUID) -> UserProfile:
+            return UserProfile(
+                id=user_id,
+                display_name="Контекст Тест",
+                email="ctx@example.com",
+                phone=None,
+                role="tenant",
+                is_active=True,
+                created_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
+            )
+
+        async def get_premises(self, premises_id: uuid.UUID) -> None:
+            return None
+
+        async def get_booking(self, booking_id: uuid.UUID) -> None:
+            return None
+
+        async def get_collaborator(self, collaborator_id: uuid.UUID) -> None:
+            return None
+
+    _use(_operator())
+    # Без requester_id оператор сам становится заявителем → заявка ему видна
+    # (visibility_filter: requester_id == user_id). get_user зовётся с этим requester_id.
+    created = _create(client).json()["data"]
+    ticket_id, requester_id = created["id"], created["requester_id"]
+    app.dependency_overrides[get_platform_client] = lambda: _FakeClient()
+    try:
+        resp = client.get(_RC_PATH.format(ticket_id))
+    finally:
+        app.dependency_overrides.pop(get_platform_client, None)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["degraded"] is False
+    assert data["user"] is not None
+    assert data["user"]["id"] == requester_id
+    assert data["user"]["display_name"] == "Контекст Тест"

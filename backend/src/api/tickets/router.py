@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal, PrincipalKind
+from api.clients.platform import PlatformClient
 from api.config import get_settings
 from api.db import get_session
 from api.errors import ProblemException
@@ -31,12 +32,23 @@ from api.tickets.messages import TicketMessageRepository, message_added_payload
 from api.tickets.models import Ticket
 from api.tickets.pagination import TicketSortKey
 from api.tickets.repository import TicketFilters, TicketRepository
+from api.tickets.requester_context import (
+    RequesterContext,
+    assemble_requester_context,
+    get_platform_client,
+)
 from api.tickets.schemas import (
     AssignInput,
     EscalateInput,
     Pagination,
     RateInput,
     ReopenInput,
+    RequesterBookingRead,
+    RequesterCollaboratorRead,
+    RequesterContextEnvelope,
+    RequesterContextRead,
+    RequesterPremisesRead,
+    RequesterUserRead,
     ResolveInput,
     TicketCreate,
     TicketEnvelope,
@@ -79,6 +91,26 @@ def _ticket_envelope(ticket: Ticket, x_request_id: str | None) -> TicketEnvelope
     return TicketEnvelope(
         data=TicketRead.model_validate(ticket),
         request_id=_resolve_request_id(x_request_id),
+    )
+
+
+def _requester_context_read(context: RequesterContext) -> RequesterContextRead:
+    """Смаппить доменные DTO platform-клиента в схему ответа kb-support (#81).
+
+    Провизорная форма rehome.one наружу не отдаётся — только наши схемы (`model_validate`
+    по `from_attributes`). `None`-секция остаётся `None` (сущности нет/сосед недоступен)."""
+    return RequesterContextRead(
+        user=RequesterUserRead.model_validate(context.user) if context.user else None,
+        premises=(
+            RequesterPremisesRead.model_validate(context.premises) if context.premises else None
+        ),
+        booking=RequesterBookingRead.model_validate(context.booking) if context.booking else None,
+        collaborator=(
+            RequesterCollaboratorRead.model_validate(context.collaborator)
+            if context.collaborator
+            else None
+        ),
+        degraded=context.degraded,
     )
 
 
@@ -260,6 +292,33 @@ async def get_ticket_history(
     rows = await TicketHistoryRepository(session).list_for_ticket(ticket_id)
     return TicketHistoryListEnvelope(
         data=[TicketHistoryRead.model_validate(row) for row in rows],
+        request_id=_resolve_request_id(x_request_id),
+    )
+
+
+@router.get(
+    "/{ticket_id}/requester-context",
+    response_model=RequesterContextEnvelope,
+    summary="Контекст заявителя (профиль/квартира/бронь)",
+)
+async def get_requester_context(
+    ticket_id: uuid.UUID,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    platform: PlatformClient | None = Depends(get_platform_client),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> RequesterContextEnvelope:
+    # Доступ как у /history: сначала видимость заявки (404 для чужой/несуществующей —
+    # anti-enumeration), затем — только операторам (контекст заявителя это операторская
+    # функция FR-2.2; заявителю по своей же заявке тоже 403, чтобы ПДн не утекли).
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    if not principal.is_operator:
+        raise ProblemException.forbidden(detail="Requester context is available to operators only")
+    context = await assemble_requester_context(ticket, platform)
+    return RequesterContextEnvelope(
+        data=_requester_context_read(context),
         request_id=_resolve_request_id(x_request_id),
     )
 
