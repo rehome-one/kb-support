@@ -333,7 +333,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Список SLA-политик */
+        /**
+         * Список SLA-политик
+         * @description scope=staff_admin. Включает неактивные политики (admin-конфигурация).
+         */
         get: operations["listSLAPolicies"];
         put?: never;
         /**
@@ -345,6 +348,82 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/sla-policies/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * SLA-политика
+         * @description scope=staff_admin
+         */
+        get: operations["getSLAPolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Изменить SLA-политику
+         * @description scope=staff_admin
+         */
+        patch: operations["updateSLAPolicy"];
+        trace?: never;
+    };
+    "/api/v1/support/business-hours": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Список графиков рабочего времени
+         * @description scope=staff_admin. Включает неактивные графики.
+         */
+        get: operations["listBusinessHours"];
+        put?: never;
+        /**
+         * Создать график рабочего времени
+         * @description scope=staff_admin
+         */
+        post: operations["createBusinessHours"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/business-hours/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * График рабочего времени
+         * @description scope=staff_admin
+         */
+        get: operations["getBusinessHours"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Изменить график рабочего времени
+         * @description scope=staff_admin
+         */
+        patch: operations["updateBusinessHours"];
         trace?: never;
     };
     "/api/v1/support/automation-rules": {
@@ -801,36 +880,89 @@ export interface components {
             type?: components["schemas"]["TicketType"];
             linked_article_slug?: string;
         };
+        /** @description Условия применения SLA-политики (пустой объект = применима ко всем) */
+        SLAAppliesTo: {
+            types?: components["schemas"]["TicketType"][];
+            priorities?: components["schemas"]["TicketPriority"][];
+            requester_roles?: string[];
+        };
         SLAPolicy: {
             /** Format: uuid */
             id: string;
             name: string;
-            /** @description Условия применения */
-            applies_to?: {
-                types?: components["schemas"]["TicketType"][];
-                priorities?: components["schemas"]["TicketPriority"][];
-                requester_roles?: string[];
-            };
+            applies_to: components["schemas"]["SLAAppliesTo"];
             first_response_minutes: number;
             resolution_minutes: number;
             /**
              * Format: uuid
-             * @description График (рабочие часы / 24-7)
+             * @description График (рабочие часы / 24-7 при null)
              */
             business_hours_id?: string | null;
             /** @description Приоритет применения при пересечении условий */
-            priority?: number;
+            priority: number;
+            is_active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         SLAPolicyInput: {
             name: string;
-            applies_to?: {
-                [key: string]: unknown;
-            };
+            applies_to?: components["schemas"]["SLAAppliesTo"];
             first_response_minutes: number;
             resolution_minutes: number;
             /** Format: uuid */
-            business_hours_id?: string;
+            business_hours_id?: string | null;
             priority?: number;
+        };
+        /** @description Частичное обновление SLA-политики (переданные поля) */
+        SLAPolicyUpdate: {
+            name?: string;
+            applies_to?: components["schemas"]["SLAAppliesTo"];
+            first_response_minutes?: number;
+            resolution_minutes?: number;
+            /** Format: uuid */
+            business_hours_id?: string | null;
+            priority?: number;
+            is_active?: boolean;
+        };
+        /** @description Недельный график: день → массив интервалов рабочего времени. Интервал — пара ["HH:MM", "HH:MM"] (24ч, open < close). Отсутствующий день или пустой массив = выходной. */
+        WeeklySchedule: {
+            mon?: components["schemas"]["DayIntervals"];
+            tue?: components["schemas"]["DayIntervals"];
+            wed?: components["schemas"]["DayIntervals"];
+            thu?: components["schemas"]["DayIntervals"];
+            fri?: components["schemas"]["DayIntervals"];
+            sat?: components["schemas"]["DayIntervals"];
+            sun?: components["schemas"]["DayIntervals"];
+        };
+        /** @description Интервалы рабочего времени за день */
+        DayIntervals: string[][];
+        BusinessHours: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description IANA-таймзона (напр. Europe/Moscow) */
+            timezone: string;
+            schedule: components["schemas"]["WeeklySchedule"];
+            is_active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        BusinessHoursInput: {
+            name: string;
+            /** @description IANA-таймзона (напр. Europe/Moscow) */
+            timezone: string;
+            schedule?: components["schemas"]["WeeklySchedule"];
+        };
+        /** @description Частичное обновление графика (переданные поля) */
+        BusinessHoursUpdate: {
+            name?: string;
+            timezone?: string;
+            schedule?: components["schemas"]["WeeklySchedule"];
+            is_active?: boolean;
         };
         AutomationRule: {
             /** Format: uuid */
@@ -1692,11 +1824,7 @@ export interface operations {
     };
     listSLAPolicies: {
         parameters: {
-            query?: {
-                /** @description Курсор для пагинации (из предыдущего ответа) */
-                cursor?: components["parameters"]["Cursor"];
-                limit?: components["parameters"]["Limit"];
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -1711,10 +1839,11 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ResponseEnvelope"] & {
                         data?: components["schemas"]["SLAPolicy"][];
-                        pagination?: components["schemas"]["Pagination"];
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createSLAPolicy: {
@@ -1744,7 +1873,188 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getSLAPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["SLAPolicy"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateSLAPolicy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description CSRF-токен для браузерных сессий (CookieAuth) */
+                "X-CSRF-Token"?: components["parameters"]["CsrfToken"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SLAPolicyUpdate"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["SLAPolicy"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    listBusinessHours: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["BusinessHours"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createBusinessHours: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description CSRF-токен для браузерных сессий (CookieAuth) */
+                "X-CSRF-Token"?: components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BusinessHoursInput"];
+            };
+        };
+        responses: {
+            /** @description Создано */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["BusinessHours"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getBusinessHours: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["BusinessHours"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateBusinessHours: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description CSRF-токен для браузерных сессий (CookieAuth) */
+                "X-CSRF-Token"?: components["parameters"]["CsrfToken"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BusinessHoursUpdate"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["BusinessHours"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };
