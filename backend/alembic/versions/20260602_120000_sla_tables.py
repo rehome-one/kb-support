@@ -114,5 +114,10 @@ def downgrade() -> None:
     # Зеркально: сначала снять FK с tickets (таблица tickets не удаляется), затем
     # удалить sla_policies, затем business_hours.
     op.drop_constraint(_FK_TICKETS_SLA, "tickets", type_="foreignkey")
+    # Колонка tickets.sla_policy_id появилась в E1 и переживает откат, но ссылки на
+    # удаляемую sla_policies без неё бессмысленны — обнуляем, иначе повторный upgrade
+    # не сможет вернуть FK (висячие значения нарушат констрейнт). С E4-3 (#87) заявки
+    # реально несут sla_policy_id, поэтому очистка обязательна для идемпотентности up/down.
+    op.execute("UPDATE tickets SET sla_policy_id = NULL")
     op.drop_table("sla_policies")
     op.drop_table("business_hours")
