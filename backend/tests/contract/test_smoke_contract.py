@@ -249,6 +249,14 @@ def test_business_hours_responses_conform(admin_client: TestClient) -> None:
     assert listed.status_code == 200
     assert_response_conforms("/api/v1/support/business-hours", "get", "200", listed.json())
 
+    # Пустой дефолт schedule={} тоже должен конформить BusinessHours (drift пустых веток).
+    empty = admin_client.post(
+        "/api/v1/support/business-hours", json={"name": "empty", "timezone": "UTC"}
+    )
+    assert empty.status_code == 201
+    assert empty.json()["data"]["schedule"] == {}
+    assert_response_conforms("/api/v1/support/business-hours", "post", "201", empty.json())
+
 
 @requires_postgres
 def test_sla_policy_responses_conform(admin_client: TestClient) -> None:
@@ -278,6 +286,15 @@ def test_sla_policy_responses_conform(admin_client: TestClient) -> None:
     listed = admin_client.get("/api/v1/support/sla-policies")
     assert listed.status_code == 200
     assert_response_conforms("/api/v1/support/sla-policies", "get", "200", listed.json())
+
+    # Дефолтный applies_to ({}) тоже должен конформить SLAPolicy/SLAAppliesTo.
+    minimal = admin_client.post(
+        "/api/v1/support/sla-policies",
+        json={"name": "minimal", "first_response_minutes": 60, "resolution_minutes": 480},
+    )
+    assert minimal.status_code == 201
+    assert minimal.json()["data"]["applies_to"] == {}
+    assert_response_conforms("/api/v1/support/sla-policies", "post", "201", minimal.json())
 
 
 def test_prism_mock_serves_tickets(prism_mock: str) -> None:
