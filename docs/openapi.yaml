@@ -694,6 +694,36 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/support/tickets/{id}/requester-context:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Tickets
+      summary: Контекст заявителя (профиль/квартира/бронь)
+      description: 'Контекст заявителя для карточки оператора (FR-2.2): профиль, объект, бронь, коллаборант. Данные из rehome.one platform по HTTP. Только для операторов; заявителю — 403. Секции независимы и nullable (сущности нет либо сосед недоступен — graceful degradation, AT-003). Поле degraded=true означает, что интеграция с platform не сконфигурирована (см. #77), а не отсутствие конкретной сущности.'
+      operationId: getRequesterContext
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/RequesterContext'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/support/tickets/from-chat:
     post:
       tags:
@@ -1614,6 +1644,164 @@ components:
         created_at:
           type: string
           format: date-time
+    RequesterUser:
+      type: object
+      description: Профиль заявителя (контекст оператору, FR-2.2)
+      required:
+      - id
+      - display_name
+      - role
+      - is_active
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        email:
+          type:
+          - string
+          - 'null'
+        phone:
+          type:
+          - string
+          - 'null'
+        role:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    RequesterPremises:
+      type: object
+      description: Объект (квартира/помещение) по заявке
+      required:
+      - id
+      - address
+      - kind
+      properties:
+        id:
+          type: string
+          format: uuid
+        address:
+          type: string
+        kind:
+          type: string
+        rooms:
+          type:
+          - integer
+          - 'null'
+        area_m2:
+          type:
+          - number
+          - 'null'
+        landlord_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+    RequesterBooking:
+      type: object
+      description: Бронь/договор найма по заявке
+      required:
+      - id
+      - premises_id
+      - tenant_id
+      - landlord_id
+      - status
+      - period_start
+      properties:
+        id:
+          type: string
+          format: uuid
+        premises_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        landlord_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        period_start:
+          type: string
+          format: date
+        period_end:
+          type:
+          - string
+          - 'null'
+          format: date
+        monthly_rent:
+          type:
+          - number
+          - 'null'
+    RequesterContact:
+      type: object
+      description: Контакты коллаборанта
+      properties:
+        email:
+          type:
+          - string
+          - 'null'
+        phone:
+          type:
+          - string
+          - 'null'
+    RequesterCollaborator:
+      type: object
+      description: Коллаборант по заявке
+      required:
+      - id
+      - name
+      - category
+      - is_active
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        category:
+          type: string
+        contact:
+          oneOf:
+          - $ref: '#/components/schemas/RequesterContact'
+          - type: 'null'
+        is_active:
+          type: boolean
+    RequesterContext:
+      type: object
+      description: 'Контекст заявителя на карточке оператора (FR-2.2). Секции независимы и nullable. degraded=true — интеграция с platform не сконфигурирована (см. #77), не про существование сущности.'
+      required:
+      - user
+      - premises
+      - booking
+      - collaborator
+      - degraded
+      properties:
+        user:
+          oneOf:
+          - $ref: '#/components/schemas/RequesterUser'
+          - type: 'null'
+        premises:
+          oneOf:
+          - $ref: '#/components/schemas/RequesterPremises'
+          - type: 'null'
+        booking:
+          oneOf:
+          - $ref: '#/components/schemas/RequesterBooking'
+          - type: 'null'
+        collaborator:
+          oneOf:
+          - $ref: '#/components/schemas/RequesterCollaborator'
+          - type: 'null'
+        degraded:
+          type: boolean
     TicketMessageCreate:
       type: object
       required:

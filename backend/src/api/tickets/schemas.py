@@ -319,3 +319,92 @@ class TicketMessageListEnvelope(BaseModel):
 
     data: list[TicketMessageRead]
     request_id: uuid.UUID
+
+
+# --- Контекст заявителя для карточки оператора (FR-2.2, enabler #81). ---
+# Это НАШИ схемы ответа kb-support: маппинг из доменных DTO platform-клиента (#71),
+# а не провизорная форма rehome.one. Все секции nullable (сущности нет/сосед недоступен).
+
+
+class RequesterUserRead(BaseModel):
+    """Профиль заявителя (из platform UserProfile DTO)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    display_name: str
+    email: str | None
+    phone: str | None
+    role: str
+    is_active: bool
+    created_at: datetime.datetime | None
+
+
+class RequesterPremisesRead(BaseModel):
+    """Объект (квартира/помещение) по заявке (из platform Premises DTO)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    address: str
+    kind: str
+    rooms: int | None
+    area_m2: float | None
+    landlord_id: uuid.UUID | None
+
+
+class RequesterBookingRead(BaseModel):
+    """Бронь/договор найма по заявке (из platform Booking DTO)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    premises_id: uuid.UUID
+    tenant_id: uuid.UUID
+    landlord_id: uuid.UUID
+    status: str
+    period_start: datetime.date
+    period_end: datetime.date | None
+    monthly_rent: float | None
+
+
+class RequesterContactRead(BaseModel):
+    """Контакты коллаборанта (из platform Contact DTO)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    email: str | None
+    phone: str | None
+
+
+class RequesterCollaboratorRead(BaseModel):
+    """Коллаборант по заявке (из platform Collaborator DTO)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    category: str
+    contact: RequesterContactRead | None
+    is_active: bool
+
+
+class RequesterContextRead(BaseModel):
+    """Контекст заявителя на карточке оператора (FR-2.2). Секции независимы и nullable.
+
+    `degraded=true` — интеграция с platform не сконфигурирована (пустой токен, см. #77);
+    это про доступность интеграции, не про существование сущности.
+    """
+
+    user: RequesterUserRead | None
+    premises: RequesterPremisesRead | None
+    booking: RequesterBookingRead | None
+    collaborator: RequesterCollaboratorRead | None
+    degraded: bool
+
+
+class RequesterContextEnvelope(BaseModel):
+    """Конверт ответа с контекстом заявителя."""
+
+    data: RequesterContextRead
+    request_id: uuid.UUID

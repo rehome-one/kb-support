@@ -244,6 +244,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/support/tickets/{id}/requester-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Контекст заявителя (профиль/квартира/бронь)
+         * @description Контекст заявителя для карточки оператора (FR-2.2): профиль, объект, бронь, коллаборант. Данные из rehome.one platform по HTTP. Только для операторов; заявителю — 403. Секции независимы и nullable (сущности нет либо сосед недоступен — graceful degradation, AT-003). Поле degraded=true означает, что интеграция с platform не сконфигурирована (см. #77), а не отсутствие конкретной сущности.
+         */
+        get: operations["getRequesterContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/support/tickets/from-chat": {
         parameters: {
             query?: never;
@@ -665,6 +687,68 @@ export interface components {
             } | null;
             /** Format: date-time */
             created_at: string;
+        };
+        /** @description Профиль заявителя (контекст оператору, FR-2.2) */
+        RequesterUser: {
+            /** Format: uuid */
+            id: string;
+            display_name: string;
+            email?: string | null;
+            phone?: string | null;
+            role: string;
+            is_active: boolean;
+            /** Format: date-time */
+            created_at?: string | null;
+        };
+        /** @description Объект (квартира/помещение) по заявке */
+        RequesterPremises: {
+            /** Format: uuid */
+            id: string;
+            address: string;
+            kind: string;
+            rooms?: number | null;
+            area_m2?: number | null;
+            /** Format: uuid */
+            landlord_id?: string | null;
+        };
+        /** @description Бронь/договор найма по заявке */
+        RequesterBooking: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            premises_id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            /** Format: uuid */
+            landlord_id: string;
+            status: string;
+            /** Format: date */
+            period_start: string;
+            /** Format: date */
+            period_end?: string | null;
+            monthly_rent?: number | null;
+        };
+        /** @description Контакты коллаборанта */
+        RequesterContact: {
+            email?: string | null;
+            phone?: string | null;
+        };
+        /** @description Коллаборант по заявке */
+        RequesterCollaborator: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            category: string;
+            contact?: components["schemas"]["RequesterContact"] | null;
+            is_active: boolean;
+        };
+        /** @description Контекст заявителя на карточке оператора (FR-2.2). Секции независимы и nullable. degraded=true — интеграция с platform не сконфигурирована (см. #77), не про существование сущности. */
+        RequesterContext: {
+            user: components["schemas"]["RequesterUser"] | null;
+            premises: components["schemas"]["RequesterPremises"] | null;
+            booking: components["schemas"]["RequesterBooking"] | null;
+            collaborator: components["schemas"]["RequesterCollaborator"] | null;
+            degraded: boolean;
         };
         TicketMessageCreate: {
             body: string;
@@ -1448,6 +1532,32 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ResponseEnvelope"] & {
                         data?: components["schemas"]["TicketHistory"][];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getRequesterContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["RequesterContext"];
                     };
                 };
             };
