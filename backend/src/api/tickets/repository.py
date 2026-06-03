@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import ColumnElement, and_, literal, or_, select
+from sqlalchemy import ColumnElement, and_, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -243,13 +243,17 @@ class TicketRepository:
             conditions.append(Ticket.tags.any(literal(filters.tag)))
         if filters.sla_breached is not None:
             now = datetime.datetime.now(datetime.UTC)
+            # Согласовано с is_resolution_breached (#89): as_of = resolved_at (уложились?)
+            # ИЛИ sla_paused_at (заморожено паузой) ИЛИ now. Пауза замораживает breach,
+            # late-resolve = breach.
+            as_of = func.coalesce(Ticket.resolved_at, Ticket.sla_paused_at, now)
             if filters.sla_breached:
                 conditions.append(
-                    and_(Ticket.resolution_due_at.is_not(None), Ticket.resolution_due_at < now)
+                    and_(Ticket.resolution_due_at.is_not(None), as_of >= Ticket.resolution_due_at)
                 )
             else:
                 conditions.append(
-                    or_(Ticket.resolution_due_at.is_(None), Ticket.resolution_due_at >= now)
+                    or_(Ticket.resolution_due_at.is_(None), as_of < Ticket.resolution_due_at)
                 )
         return conditions
 
