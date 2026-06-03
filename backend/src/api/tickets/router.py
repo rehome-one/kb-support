@@ -69,6 +69,7 @@ from api.tickets.schemas import (
     TicketSummaryRead,
     TicketUpdate,
 )
+from api.tickets.sla_metrics import record_first_response
 from api.tickets.state_machine import is_allowed_transition
 
 router = APIRouter(prefix="/api/v1/support/tickets", tags=["Tickets"])
@@ -382,6 +383,7 @@ async def create_message(
     # (NFR-1.3). На норматив решения это не влияет — отдельный дедлайн.
     if is_public_operator_reply(message) and ticket.first_responded_at is None:
         ticket.first_responded_at = datetime.datetime.now(datetime.UTC)
+        record_first_response(ticket)  # TTFR + first-response breach (E4-7 #91)
     await TicketHistoryRepository(session).record(
         ticket_id,
         principal.user_id,

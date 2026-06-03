@@ -28,6 +28,7 @@ from api.tickets.pagination import (
     row_cursor_value,
 )
 from api.tickets.schemas import TicketCreate, TicketFromChat, TicketUpdate
+from api.tickets.sla_metrics import record_resolution
 from api.tickets.sla_pause import apply_pause_accounting
 
 
@@ -64,7 +65,11 @@ def apply_status_side_effects(ticket: Ticket, old_status: str) -> None:
     if ticket.status == TicketStatus.REOPENED.value:
         ticket.reopened_count += 1
     elif ticket.status == TicketStatus.RESOLVED.value:
+        first_resolution = ticket.resolved_at is None
         ticket.resolved_at = now
+        # TTR/breach — только на ПЕРВОМ решении (REOPENED→RESOLVED не задваивает, #91).
+        if first_resolution:
+            record_resolution(ticket)
     elif ticket.status == TicketStatus.CLOSED.value:
         ticket.closed_at = now
 
