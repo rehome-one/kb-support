@@ -25,8 +25,8 @@ from api.clients.kb_search import HttpKbSearchClient, OperatorReply
 from api.clients.retry import RetryPolicy
 from api.config import Settings
 from api.observability.logging import get_logger
-from api.tickets.enums import AuthorType, TicketChannel
-from api.tickets.messages import TicketMessage
+from api.tickets.enums import TicketChannel
+from api.tickets.messages import TicketMessage, is_public_operator_reply
 from api.tickets.models import Ticket
 
 _logger = get_logger("chat_bridge")
@@ -36,8 +36,7 @@ def should_return_to_chat(ticket: Ticket, message: TicketMessage) -> bool:
     """NFR-1.3 gate. True только для публичного ответа оператора по AI_CHAT-заявке
     с chat_session_id. Флаги читаются из сохранённого сообщения, не из payload."""
     return (
-        message.author_type == AuthorType.OPERATOR.value
-        and not message.is_internal
+        is_public_operator_reply(message)
         and ticket.channel == TicketChannel.AI_CHAT.value
         and ticket.chat_session_id is not None
     )

@@ -586,6 +586,11 @@ export interface components {
         SigningStatus: "one_signed" | "both_signed" | "disputed";
         /** @enum {string} */
         AuthorType: "requester" | "operator" | "system" | "ai";
+        /**
+         * @description Состояние SLA для индикации (FR-4.3): none — без SLA; ok — в норме; approaching — осталось <20% временного окна; breached — дедлайн нарушен. Комбинация (худшее) дедлайнов первого ответа и решения; учитывает паузу.
+         * @enum {string}
+         */
+        SlaState: "none" | "ok" | "approaching" | "breached";
         /** @description Краткая карточка заявки (для списков) */
         TicketSummary: {
             /** Format: uuid */
@@ -609,8 +614,9 @@ export interface components {
             first_response_due_at?: string | null;
             /** Format: date-time */
             resolution_due_at?: string | null;
-            /** @description Нарушен ли SLA (расчётное поле для индикации) */
+            /** @description Нарушен ли дедлайн решения (расчётное поле; учитывает паузу и факт решения) */
             sla_breached?: boolean;
+            sla_state?: components["schemas"]["SlaState"];
             tags?: string[];
             /** Format: date-time */
             created_at: string;

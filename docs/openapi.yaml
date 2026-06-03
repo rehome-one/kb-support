@@ -1486,6 +1486,17 @@ components:
       - operator
       - system
       - ai
+    SlaState:
+      type: string
+      enum:
+      - none
+      - ok
+      - approaching
+      - breached
+      description: >-
+        Состояние SLA для индикации (FR-4.3): none — без SLA; ok — в норме;
+        approaching — осталось <20% временного окна; breached — дедлайн нарушен.
+        Комбинация (худшее) дедлайнов первого ответа и решения; учитывает паузу.
     TicketSummary:
       type: object
       description: Краткая карточка заявки (для списков)
@@ -1540,7 +1551,9 @@ components:
           format: date-time
         sla_breached:
           type: boolean
-          description: Нарушен ли SLA (расчётное поле для индикации)
+          description: Нарушен ли дедлайн решения (расчётное поле; учитывает паузу и факт решения)
+        sla_state:
+          $ref: '#/components/schemas/SlaState'
         tags:
           type: array
           items:

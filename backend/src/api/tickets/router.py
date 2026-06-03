@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import datetime
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, status
@@ -28,7 +29,11 @@ from api.tickets.enums import (
     TicketType,
 )
 from api.tickets.history import TicketHistoryAction, TicketHistoryRepository
-from api.tickets.messages import TicketMessageRepository, message_added_payload
+from api.tickets.messages import (
+    TicketMessageRepository,
+    is_public_operator_reply,
+    message_added_payload,
+)
 from api.tickets.models import Ticket
 from api.tickets.pagination import TicketSortKey
 from api.tickets.repository import TicketFilters, TicketRepository
@@ -372,6 +377,11 @@ async def create_message(
         is_internal=payload.is_internal,
         attachments=payload.attachments,
     )
+    # SLA-факт (E4-5 #89): первый ПУБЛИЧНЫЙ ответ оператора фиксирует first_responded_at
+    # (идемпотентно — только если ещё не задан). Внутренняя заметка ответом не считается
+    # (NFR-1.3). На норматив решения это не влияет — отдельный дедлайн.
+    if is_public_operator_reply(message) and ticket.first_responded_at is None:
+        ticket.first_responded_at = datetime.datetime.now(datetime.UTC)
     await TicketHistoryRepository(session).record(
         ticket_id,
         principal.user_id,

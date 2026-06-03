@@ -52,6 +52,13 @@ class TicketMessage(Base):
         return f"<TicketMessage ticket_id={self.ticket_id!r} is_internal={self.is_internal!r}>"
 
 
+def is_public_operator_reply(message: TicketMessage) -> bool:
+    """Публичный ответ оператора (не внутренняя заметка). Флаги — из сохранённого
+    сообщения (anti-spoofing). Используется для `first_responded_at` (#89) и возврата
+    ответа в чат (#72)."""
+    return message.author_type == AuthorType.OPERATOR.value and not message.is_internal
+
+
 class TicketMessageRepository:
     """Создание и чтение сообщений с фильтром видимости (NFR-1.3)."""
 

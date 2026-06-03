@@ -297,6 +297,24 @@ def test_sla_policy_responses_conform(admin_client: TestClient) -> None:
     assert_response_conforms("/api/v1/support/sla-policies", "post", "201", minimal.json())
 
 
+@requires_postgres
+def test_ticket_exposes_sla_state(operator_client: TestClient) -> None:
+    """AT-002 (#89): ответ getTicket несёт sla_state из домена SlaState и конформен."""
+    created = operator_client.post(
+        "/api/v1/support/tickets", json={"subject": "sla", "type": "PAYMENT"}
+    )
+    assert created.status_code == 201
+    ticket_id = created.json()["data"]["id"]
+
+    resp = operator_client.get(f"/api/v1/support/tickets/{ticket_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data"]["sla_state"] in {"none", "ok", "approaching", "breached"}
+    # Источники расчёта (sla_paused_at) НЕ должны утекать в ответ (Field exclude).
+    assert "sla_paused_at" not in body["data"]
+    assert_response_conforms("/api/v1/support/tickets/{id}", "get", "200", body)
+
+
 def test_prism_mock_serves_tickets(prism_mock: str) -> None:
     """Опционально (RUN_PRISM_CONTRACT=1): Prism mock из спеки отдаёт валидный ответ."""
     resp = httpx.get(

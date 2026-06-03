@@ -25,6 +25,11 @@ from api.tickets.enums import (
     TicketTeam,
     TicketType,
 )
+from api.tickets.sla_state import (
+    SlaStateValue,
+    compute_sla_state,
+    is_resolution_breached,
+)
 from api.tickets.state_machine import is_allowed_transition
 
 
@@ -114,18 +119,35 @@ class TicketSummaryRead(BaseModel):
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
+    # Источники расчёта SLA-состояния — НЕ сериализуются (контракт растёт только на
+    # sla_state), но доступны computed-полям. default=None — для фикстур/частичных данных.
+    first_responded_at: datetime.datetime | None = Field(default=None, exclude=True)
+    resolved_at: datetime.datetime | None = Field(default=None, exclude=True)
+    sla_paused_at: datetime.datetime | None = Field(default=None, exclude=True)
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def sla_breached(self) -> bool:
-        """Расчётное поле: нарушен ли дедлайн решения (в E1 всегда false — SLA это E4).
+        """Нарушен ли дедлайн решения (с учётом текущей паузы и факта решения, #89)."""
+        return is_resolution_breached(
+            datetime.datetime.now(datetime.UTC),
+            resolution_due_at=self.resolution_due_at,
+            resolved_at=self.resolved_at,
+            sla_paused_at=self.sla_paused_at,
+        )
 
-        ВНИМАНИЕ (#88→#89): при ТЕКУЩЕЙ незавершённой паузе (PENDING/WAITING) сдвиг
-        `resolution_due_at` ещё не применён (он на выходе из паузы, #88), поэтому
-        зависшая в паузе сверх дедлайна заявка даст ложный `true`. Учёт активной паузы
-        по `sla_paused_at` на чтении — задача #89."""
-        return (
-            self.resolution_due_at is not None
-            and self.resolution_due_at < datetime.datetime.now(datetime.UTC)
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def sla_state(self) -> SlaStateValue:
+        """Состояние SLA для индикации (FR-4.3): none/ok/approaching/breached (#89)."""
+        return compute_sla_state(
+            datetime.datetime.now(datetime.UTC),
+            created_at=self.created_at,
+            first_response_due_at=self.first_response_due_at,
+            first_responded_at=self.first_responded_at,
+            resolution_due_at=self.resolution_due_at,
+            resolved_at=self.resolved_at,
+            sla_paused_at=self.sla_paused_at,
         )
 
 
@@ -180,6 +202,9 @@ class TicketRead(BaseModel):
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
+    # Источник расчёта SLA-состояния (#89) — не сериализуется, доступен computed-полям.
+    sla_paused_at: datetime.datetime | None = Field(default=None, exclude=True)
+
     # --- Поля претензионных типов (§3.1.1) — всегда null на E1 (E10 наполнит) ---
     case_state: str | None = None
     claim_amount: float | None = None
@@ -208,6 +233,31 @@ class TicketRead(BaseModel):
             for status in TicketStatus
             if status != self.status and is_allowed_transition(self.status, status)
         ]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def sla_breached(self) -> bool:
+        """Нарушен ли дедлайн решения (с учётом текущей паузы и факта решения, #89)."""
+        return is_resolution_breached(
+            datetime.datetime.now(datetime.UTC),
+            resolution_due_at=self.resolution_due_at,
+            resolved_at=self.resolved_at,
+            sla_paused_at=self.sla_paused_at,
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def sla_state(self) -> SlaStateValue:
+        """Состояние SLA для индикации (FR-4.3): none/ok/approaching/breached (#89)."""
+        return compute_sla_state(
+            datetime.datetime.now(datetime.UTC),
+            created_at=self.created_at,
+            first_response_due_at=self.first_response_due_at,
+            first_responded_at=self.first_responded_at,
+            resolution_due_at=self.resolution_due_at,
+            resolved_at=self.resolved_at,
+            sla_paused_at=self.sla_paused_at,
+        )
 
 
 class TicketEnvelope(BaseModel):
