@@ -117,7 +117,12 @@ class TicketSummaryRead(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def sla_breached(self) -> bool:
-        """Расчётное поле: нарушен ли дедлайн решения (в E1 всегда false — SLA это E4)."""
+        """Расчётное поле: нарушен ли дедлайн решения (в E1 всегда false — SLA это E4).
+
+        ВНИМАНИЕ (#88→#89): при ТЕКУЩЕЙ незавершённой паузе (PENDING/WAITING) сдвиг
+        `resolution_due_at` ещё не применён (он на выходе из паузы, #88), поэтому
+        зависшая в паузе сверх дедлайна заявка даст ложный `true`. Учёт активной паузы
+        по `sla_paused_at` на чтении — задача #89."""
         return (
             self.resolution_due_at is not None
             and self.resolution_due_at < datetime.datetime.now(datetime.UTC)

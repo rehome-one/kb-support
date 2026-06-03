@@ -28,6 +28,7 @@ from api.tickets.pagination import (
     row_cursor_value,
 )
 from api.tickets.schemas import TicketCreate, TicketFromChat, TicketUpdate
+from api.tickets.sla_pause import apply_pause_accounting
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,8 @@ def apply_status_side_effects(ticket: Ticket, old_status: str) -> None:
     if ticket.status == old_status:
         return
     now = datetime.datetime.now(datetime.UTC)
+    # Учёт пауз SLA (E4-4 #88): вход/выход PENDING/WAITING → сдвиг resolution_due_at.
+    apply_pause_accounting(ticket, old_status, now)
     if ticket.status == TicketStatus.REOPENED.value:
         ticket.reopened_count += 1
     elif ticket.status == TicketStatus.RESOLVED.value:
