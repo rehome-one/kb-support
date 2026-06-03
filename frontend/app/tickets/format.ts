@@ -197,3 +197,24 @@ export function formatHistoryDiff(
   if (!after) return `${before} →`;
   return `${before} → ${after}`;
 }
+
+// Состояние SLA (#92, FR-4.3). Значения и семантика — с бэкенда (#89); фронт только
+// отображает (никаких вычислений времени в браузере).
+export const SLA_STATE_LABELS: Record<string, string> = {
+  none: "Нет SLA",
+  ok: "OK",
+  approaching: "Скоро дедлайн",
+  breached: "Нарушен",
+};
+
+const SLA_STATE_CLASSES: Record<string, string> = {
+  ok: "text-green-600",
+  approaching: "text-amber-500",
+  breached: "text-red-600",
+  none: "text-gray-400",
+};
+
+/** Tailwind-класс цвета для состояния SLA; нейтральный для неизвестного/none. */
+export function slaStateClass(state: string | null | undefined): string {
+  return (state && SLA_STATE_CLASSES[state]) || "text-gray-400";
+}

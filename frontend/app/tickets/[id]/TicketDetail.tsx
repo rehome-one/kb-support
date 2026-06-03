@@ -8,6 +8,7 @@ import {
   label,
   shortId,
 } from "../format";
+import { SlaBadge } from "../SlaBadge";
 import type { Ticket } from "./types";
 
 function Field({ title, children }: { title: string; children: React.ReactNode }) {
@@ -41,6 +42,9 @@ export function TicketDetail({ ticket }: { ticket: Ticket }) {
         <Field title="Создана">{formatDateTime(ticket.created_at)}</Field>
         <Field title="Обновлена">{formatDateTime(ticket.updated_at)}</Field>
         <Field title="Срок решения">{formatDateTime(ticket.resolution_due_at)}</Field>
+        <Field title="SLA">
+          <SlaBadge state={ticket.sla_state} />
+        </Field>
       </dl>
 
       {ticket.description ? (

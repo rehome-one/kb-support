@@ -34,12 +34,19 @@ describe("TicketDetail", () => {
   });
 
   it("«—» для отсутствующего исполнителя", () => {
-    render(<TicketDetail ticket={ticket({ assignee_id: null })} />);
+    // sla_state задан, чтобы единственный «—» был у исполнителя (бейдж SLA не «—»).
+    render(<TicketDetail ticket={ticket({ assignee_id: null, sla_state: "ok" })} />);
     expect(screen.getByText("—")).toBeInTheDocument();
   });
 
   it("не рендерит блок описания, если оно пустое", () => {
     render(<TicketDetail ticket={ticket({ description: undefined })} />);
     expect(screen.queryByText("Описание")).not.toBeInTheDocument();
+  });
+
+  it("показывает поле SLA с состоянием", () => {
+    render(<TicketDetail ticket={ticket({ sla_state: "approaching" })} />);
+    expect(screen.getByText("SLA")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "SLA: Скоро дедлайн" })).toBeInTheDocument();
   });
 });

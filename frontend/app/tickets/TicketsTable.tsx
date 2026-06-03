@@ -9,6 +9,7 @@ import {
   label,
   shortId,
 } from "./format";
+import { SlaBadge } from "./SlaBadge";
 import type { TicketSummary } from "./types";
 
 const COLUMNS = [
@@ -60,15 +61,7 @@ export function TicketsTable({ rows }: { rows: TicketSummary[] }) {
               {formatDateTime(ticket.created_at)}
             </td>
             <td className="py-2 pr-3">
-              {ticket.sla_breached ? (
-                <span role="status" aria-label="SLA нарушен" className="font-medium text-red-600">
-                  ● SLA
-                </span>
-              ) : (
-                <span className="text-gray-300" aria-hidden="true">
-                  —
-                </span>
-              )}
+              <SlaBadge state={ticket.sla_state} />
             </td>
           </tr>
         ))}
