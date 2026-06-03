@@ -3,12 +3,34 @@ import { describe, expect, it } from "vitest";
 import {
   AUTHOR_TYPE_LABELS,
   HISTORY_ACTION_LABELS,
+  SLA_STATE_LABELS,
   STATUS_LABELS,
   formatDateTime,
   formatHistoryDiff,
   label,
   shortId,
+  slaStateClass,
 } from "./format";
+
+describe("SLA-состояние", () => {
+  it("лейблы покрывают все значения домена", () => {
+    expect(SLA_STATE_LABELS).toMatchObject({
+      none: "Нет SLA",
+      ok: "OK",
+      approaching: "Скоро дедлайн",
+      breached: "Нарушен",
+    });
+  });
+
+  it("цветовой класс по состоянию, нейтральный для неизвестного", () => {
+    expect(slaStateClass("ok")).toBe("text-green-600");
+    expect(slaStateClass("approaching")).toBe("text-amber-500");
+    expect(slaStateClass("breached")).toBe("text-red-600");
+    expect(slaStateClass("none")).toBe("text-gray-400");
+    expect(slaStateClass(undefined)).toBe("text-gray-400");
+    expect(slaStateClass("weird")).toBe("text-gray-400");
+  });
+});
 
 describe("label", () => {
   it("возвращает лейбл по карте", () => {
