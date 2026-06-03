@@ -99,6 +99,17 @@ class Ticket(TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # --- Учёт пауз SLA (E4-4 #88, FR-4.5 / ADR-0007 Решение 2: паузы = PENDING+WAITING) ---
+    # Начало ТЕКУЩЕЙ паузы (null = заявка не на паузе); накопленная длительность пауз — для
+    # сдвига resolution_due_at на выходе из паузы и аудита (E8). first_response_due_at паузами
+    # не двигается.
+    sla_paused_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sla_paused_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+
     reopened_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
