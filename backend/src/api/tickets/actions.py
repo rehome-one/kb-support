@@ -59,6 +59,20 @@ class TicketActionService:
             to_value=to_value,
         )
 
+    async def transition(
+        self,
+        ticket: Ticket,
+        target: TicketStatus,
+        actor_id: uuid.UUID,
+        *,
+        extra: dict[str, str] | None = None,
+    ) -> None:
+        """Публичный переход статуса (валидация + side-effects + history).
+
+        Тонкая обёртка над `_transition` для переиспользования вне action-эндпоинтов
+        (движок автоматизации #106): запрещённый переход → 409 (ловится вызывающим)."""
+        await self._transition(ticket, target, actor_id, extra=extra)
+
     async def assign(
         self,
         ticket: Ticket,
@@ -66,19 +80,25 @@ class TicketActionService:
         *,
         assignee_id: uuid.UUID,
         team: TicketTeam | None,
+        extra: dict[str, str] | None = None,
     ) -> None:
-        """Назначить исполнителя (и опционально команду). Статус не меняется."""
+        """Назначить исполнителя (и опционально команду). Статус не меняется.
+
+        `extra` (опц.) — доп. метки в `to_value` (напр. `automation_rule_id` #106)."""
         previous = ticket.assignee_id
         ticket.assignee_id = assignee_id
         if team is not None:
             ticket.team = team.value
         await self._session.flush()
+        to_value: dict[str, object] = {"assignee_id": str(assignee_id), "team": ticket.team}
+        if extra:
+            to_value.update(extra)
         await self._history.record(
             ticket.id,
             actor_id,
             TicketHistoryAction.REASSIGNED,
             from_value={"assignee_id": str(previous) if previous is not None else None},
-            to_value={"assignee_id": str(assignee_id), "team": ticket.team},
+            to_value=to_value,
         )
 
     async def escalate(

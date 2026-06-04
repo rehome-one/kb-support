@@ -146,18 +146,25 @@ async def record_changes(
     actor_id: uuid.UUID,
     before: dict[str, Any],
     after: dict[str, Any],
+    *,
+    extra: dict[str, str] | None = None,
 ) -> None:
     """Записать в журнал изменения отслеживаемых полей (diff before→after).
 
-    Используется обновляющими путями (PATCH/actions — #8/#12). Пишет по одной
-    строке на каждое реально изменившееся отслеживаемое поле.
+    Используется обновляющими путями (PATCH/actions — #8/#12) и движком автоматизации
+    (#106). Пишет по одной строке на каждое реально изменившееся отслеживаемое поле.
+    `extra` (опц.) — доп. метки в `to_value` каждой строки (напр. `automation_rule_id`
+    для трассируемости системного актора); дефолт None → поведение не меняется.
     """
     for field, action in _FIELD_ACTIONS.items():
         if field in before and field in after and before[field] != after[field]:
+            to_value: dict[str, Any] = {field: _to_jsonable(after[field])}
+            if extra:
+                to_value.update(extra)
             await recorder.record(
                 ticket_id,
                 actor_id,
                 action,
                 from_value={field: _to_jsonable(before[field])},
-                to_value={field: _to_jsonable(after[field])},
+                to_value=to_value,
             )
