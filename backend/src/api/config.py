@@ -139,6 +139,27 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- SLA-воркер (E4-6, #90, ADR-0007 Решение 1). Dramatiq-actor проактивно
+    # сканирует БД по дедлайнам и дёргает breach-хук (seam под эскалацию E5/#18).
+    # ПУСТОЙ sla_worker_broker_url = выключено (StubBroker, actor инертен) — тот же
+    # gate-приём, что у platform/kb-search до #77. Боевой путь — после ops
+    # (broker/worker, пересекается с #79). Read-side breach (#89) работает независимо. ---
+    sla_worker_broker_url: str = Field(
+        default="",
+        description=(
+            "URL Redis-broker для Dramatiq SLA-воркера. ПУСТО → StubBroker, actor "
+            "инертен (broker/worker поднимает ops). Read-side breach не зависит от него."
+        ),
+    )
+    sla_scan_batch_limit: int = Field(
+        default=500,
+        ge=1,
+        description=(
+            "Максимум заявок, обрабатываемых за один проход скана SLA-дедлайнов. "
+            "Защита от чрезмерной выборки; выборка детерминирована (ORDER BY due_at)."
+        ),
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

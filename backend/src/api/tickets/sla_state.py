@@ -100,3 +100,18 @@ def is_resolution_breached(
         return False
     as_of = resolved_at if resolved_at is not None else (sla_paused_at or now)
     return as_of >= resolution_due_at
+
+
+def is_first_response_breached(
+    now: datetime.datetime,
+    *,
+    first_response_due_at: datetime.datetime | None,
+    first_responded_at: datetime.datetime | None,
+) -> bool:
+    """Нарушен ли дедлайн ПЕРВОГО ОТВЕТА.
+
+    Первый ответ паузами НЕ двигается (#88): нога «открыта», пока нет
+    `first_responded_at`. Зеркало SQL `first_response_breached_clause`."""
+    if first_response_due_at is None or first_responded_at is not None:
+        return False
+    return now >= first_response_due_at

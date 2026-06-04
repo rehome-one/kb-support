@@ -26,6 +26,9 @@ dependencies = [
     # Redis-кеш HTTP-клиентов к соседям (AT-003, E3-2). Часть утверждённого стека
     # (CLAUDE.md, ADR-0005 Решение 1, ADR-0006) — не новый сервис. Async: redis.asyncio.
     "redis>=5,<6",
+    # SLA-таймеры (E4-6, #90). Стек предписывает Dramatiq (NFR-4.2, ADR-0007).
+    # Actor config-gated: без broker URL — StubBroker, инертен (broker/worker — ops).
+    "dramatiq>=1.16,<2",
 ]
 
 [project.optional-dependencies]
@@ -93,6 +96,9 @@ disallow_untyped_defs = true
 disallow_any_generics = true
 check_untyped_defs = true
 files = ["src", "tests"]
+# dramatiq (1.18, py.typed) типизирован частично: конструкторы брокеров
+# (StubBroker/RedisBroker) — untyped. Разрешаем их вызов, не ослабляя strict в целом.
+untyped_calls_exclude = ["dramatiq"]
 
 [[tool.mypy.overrides]]
 module = "tests.*"
