@@ -35,3 +35,22 @@ class AutomationActionType(str, enum.Enum):
     NOTIFY = "notify"
     ESCALATE = "escalate"
     CREATE_SERVICE_ORDER = "create_service_order"
+
+
+class AssignStrategy(str, enum.Enum):
+    """Стратегия действия `assign` (ADR-0008 Реш.5). direct — конкретный оператор;
+    round_robin/least_load — выбор из команды (least_load: наименьшая загрузка,
+    live-query #109); пул операторов — seam platform/#77."""
+
+    DIRECT = "direct"
+    ROUND_ROBIN = "round_robin"
+    LEAST_LOAD = "least_load"
+
+
+class NotifyRecipient(str, enum.Enum):
+    """Адресат действия `notify` (seam, ADR-0008 Реш.3). Реальная доставка — E7."""
+
+    REQUESTER = "requester"
+    ASSIGNEE = "assignee"
+    SUPERVISOR = "supervisor"
+    TEAM = "team"

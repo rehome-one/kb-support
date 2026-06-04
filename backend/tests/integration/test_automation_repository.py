@@ -79,24 +79,26 @@ def test_list_active_orders_by_apply_order_filters_trigger_and_excludes_inactive
         )
         await session.flush()
 
-        # Все активные: порядок apply_order asc (1,5,10), inactive исключён.
-        all_active = await repo.list_active()
-        assert [r.name for r in all_active] == ["b-early", "c-update", "a-late"]
+        # Тест-БД общая (admin/contract-тесты коммитят правила) → относительные
+        # проверки по СВОИМ правилам, не точное равенство (как test_sla_repository).
+        mine = {"a-late", "b-early", "c-update", "d-inactive"}
 
-        # Фильтр по триггеру: только on_create активные.
-        on_create = await repo.list_active(trigger="on_create")
-        assert [r.name for r in on_create] == ["b-early", "a-late"]
+        # Все активные: inactive исключён; порядок apply_order asc (1<5<10).
+        active = [r.name for r in await repo.list_active() if r.name in mine]
+        assert "d-inactive" not in active
+        assert active.index("b-early") < active.index("c-update") < active.index("a-late")
 
-        # Триггер без правил → пусто.
-        assert await repo.list_active(trigger="time_based") == []
+        # Фильтр по триггеру: только on_create активные (c-update — on_update — исключён).
+        on_create = [r.name for r in await repo.list_active(trigger="on_create") if r.name in mine]
+        assert "c-update" not in on_create
+        assert on_create.index("b-early") < on_create.index("a-late")
 
-        # list_all включает неактивные.
-        assert {r.name for r in await repo.list_all()} == {
-            "a-late",
-            "b-early",
-            "c-update",
-            "d-inactive",
-        }
+        # time_based: ни одного из моих правил.
+        tb = {r.name for r in await repo.list_active(trigger="time_based")}
+        assert not (mine & tb)
+
+        # list_all включает неактивные (мои 4 ⊆ результат).
+        assert mine <= {r.name for r in await repo.list_all()}
 
     _in_rolled_back_session(body)
 
@@ -115,8 +117,9 @@ def test_list_active_tiebreak_by_id() -> None:
         )
         await session.flush()
 
-        names = [r.name for r in await repo.list_active()]
-        assert names == ["low-id", "high-id"]
+        # Среди моих двух (равный apply_order) — тай-брейк по id: low-id раньше high-id.
+        mine = [r.name for r in await repo.list_active() if r.name in {"low-id", "high-id"}]
+        assert mine == ["low-id", "high-id"]
 
     _in_rolled_back_session(body)
 

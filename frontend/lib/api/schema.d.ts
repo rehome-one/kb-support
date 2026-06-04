@@ -433,7 +433,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Список правил автоматизации */
+        /**
+         * Список правил автоматизации
+         * @description scope=staff_admin. Включает неактивные правила (admin-конфигурация).
+         */
         get: operations["listAutomationRules"];
         put?: never;
         /**
@@ -445,6 +448,32 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/automation-rules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Правило автоматизации
+         * @description scope=staff_admin
+         */
+        get: operations["getAutomationRule"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Изменить правило автоматизации
+         * @description scope=staff_admin
+         */
+        patch: operations["updateAutomationRule"];
         trace?: never;
     };
     "/api/v1/support/stats": {
@@ -970,41 +999,138 @@ export interface components {
             schedule?: components["schemas"]["WeeklySchedule"];
             is_active?: boolean;
         };
+        /** @enum {string} */
+        AutomationTrigger: "on_create" | "on_update" | "on_sla_breach" | "time_based";
+        /** @description Условия применения правила (конъюнкция). Отсутствует/пусто = wildcard; пустой объект = ко всем заявкам триггера. keywords — подстрочный case-insensitive матчинг по subject/description. */
+        AutomationConditions: {
+            types?: components["schemas"]["TicketType"][];
+            priorities?: components["schemas"]["TicketPriority"][];
+            channels?: components["schemas"]["TicketChannel"][];
+            keywords?: string[];
+        };
+        AssignActionParams: {
+            /** @enum {string} */
+            strategy: "direct" | "round_robin" | "least_load";
+            /**
+             * Format: uuid
+             * @description Требуется при strategy=direct.
+             */
+            operator_id?: string;
+            team?: components["schemas"]["TicketTeam"];
+            /** @description Явный пул операторов (seam до platform-источника, #77). */
+            pool?: string[];
+        };
+        SetStatusActionParams: {
+            status: components["schemas"]["TicketStatus"];
+        };
+        SetPriorityActionParams: {
+            priority: components["schemas"]["TicketPriority"];
+        };
+        AddTagActionParams: {
+            tags: string[];
+        };
+        EscalateActionParams: {
+            team?: components["schemas"]["TicketTeam"];
+        };
+        /** @description seam: доставка уведомлений — E7 (config-gated, ADR-0008 Реш.3). */
+        NotifyActionParams: {
+            /** @enum {string} */
+            recipient: "requester" | "assignee" | "supervisor" | "team";
+            channel?: string;
+            template?: string;
+        };
+        /** @description seam: заказ коллаборанта — platform/#77 (config-gated). */
+        CreateServiceOrderActionParams: {
+            collaborator_category?: string;
+            /** Format: uuid */
+            premises_id?: string;
+        };
+        AssignAction: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "assign";
+            params: components["schemas"]["AssignActionParams"];
+        };
+        SetStatusAction: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "set_status";
+            params: components["schemas"]["SetStatusActionParams"];
+        };
+        SetPriorityAction: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "set_priority";
+            params: components["schemas"]["SetPriorityActionParams"];
+        };
+        AddTagAction: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "add_tag";
+            params: components["schemas"]["AddTagActionParams"];
+        };
+        EscalateAction: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "escalate";
+            params: components["schemas"]["EscalateActionParams"];
+        };
+        NotifyAction: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "notify";
+            params: components["schemas"]["NotifyActionParams"];
+        };
+        CreateServiceOrderAction: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            action: "create_service_order";
+            params: components["schemas"]["CreateServiceOrderActionParams"];
+        };
+        AutomationAction: components["schemas"]["AssignAction"] | components["schemas"]["SetStatusAction"] | components["schemas"]["SetPriorityAction"] | components["schemas"]["AddTagAction"] | components["schemas"]["EscalateAction"] | components["schemas"]["NotifyAction"] | components["schemas"]["CreateServiceOrderAction"];
         AutomationRule: {
             /** Format: uuid */
             id: string;
             name: string;
-            /** @enum {string} */
-            trigger: "on_create" | "on_update" | "on_sla_breach" | "time_based";
-            /** @description Условия (тип, приоритет, канал, ключевые слова) */
-            conditions?: {
-                [key: string]: unknown;
-            };
-            /** @description Действия: назначить, сменить статус, тег, уведомить, эскалировать */
-            actions: {
-                /** @enum {string} */
-                action?: "assign" | "set_status" | "set_priority" | "add_tag" | "notify" | "escalate" | "create_service_order";
-                params?: {
-                    [key: string]: unknown;
-                };
-            }[];
+            trigger: components["schemas"]["AutomationTrigger"];
+            conditions: components["schemas"]["AutomationConditions"];
+            actions: components["schemas"]["AutomationAction"][];
             /** @default true */
             is_active: boolean;
-            /** @description Порядок применения */
-            order?: number;
+            /** @description Порядок применения (asc; конфликт = last-write-wins). */
+            order: number;
         };
         AutomationRuleInput: {
             name: string;
-            /** @enum {string} */
-            trigger: "on_create" | "on_update" | "on_sla_breach" | "time_based";
-            conditions?: {
-                [key: string]: unknown;
-            };
-            actions: {
-                [key: string]: unknown;
-            }[];
+            trigger: components["schemas"]["AutomationTrigger"];
+            conditions?: components["schemas"]["AutomationConditions"];
+            actions: components["schemas"]["AutomationAction"][];
             /** @default true */
             is_active: boolean;
+            /** @default 0 */
+            order: number;
+        };
+        /** @description Частичное обновление правила (только переданные поля). */
+        AutomationRuleUpdate: {
+            name?: string;
+            trigger?: components["schemas"]["AutomationTrigger"];
+            conditions?: components["schemas"]["AutomationConditions"];
+            actions?: components["schemas"]["AutomationAction"][];
+            is_active?: boolean;
             order?: number;
         };
         SupportStats: {
@@ -2066,11 +2192,7 @@ export interface operations {
     };
     listAutomationRules: {
         parameters: {
-            query?: {
-                /** @description Курсор для пагинации (из предыдущего ответа) */
-                cursor?: components["parameters"]["Cursor"];
-                limit?: components["parameters"]["Limit"];
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -2085,10 +2207,11 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ResponseEnvelope"] & {
                         data?: components["schemas"]["AutomationRule"][];
-                        pagination?: components["schemas"]["Pagination"];
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createAutomationRule: {
@@ -2118,7 +2241,70 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getAutomationRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["AutomationRule"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateAutomationRule: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description CSRF-токен для браузерных сессий (CookieAuth) */
+                "X-CSRF-Token"?: components["parameters"]["CsrfToken"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutomationRuleUpdate"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["AutomationRule"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };
