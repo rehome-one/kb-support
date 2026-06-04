@@ -1103,10 +1103,8 @@ paths:
       tags:
       - Automation
       summary: Список правил автоматизации
+      description: scope=staff_admin. Включает неактивные правила (admin-конфигурация).
       operationId: listAutomationRules
-      parameters:
-      - $ref: '#/components/parameters/Cursor'
-      - $ref: '#/components/parameters/Limit'
       responses:
         '200':
           description: OK
@@ -1121,8 +1119,10 @@ paths:
                       type: array
                       items:
                         $ref: '#/components/schemas/AutomationRule'
-                    pagination:
-                      $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags:
       - Automation
@@ -1149,8 +1149,76 @@ paths:
                   properties:
                     data:
                       $ref: '#/components/schemas/AutomationRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/automation-rules/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Automation
+      summary: Правило автоматизации
+      description: scope=staff_admin
+      operationId: getAutomationRule
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AutomationRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - Automation
+      summary: Изменить правило автоматизации
+      description: scope=staff_admin
+      operationId: updateAutomationRule
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutomationRuleUpdate'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AutomationRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/support/stats:
@@ -2297,13 +2365,210 @@ components:
           $ref: '#/components/schemas/WeeklySchedule'
         is_active:
           type: boolean
+    AutomationTrigger:
+      type: string
+      enum:
+      - on_create
+      - on_update
+      - on_sla_breach
+      - time_based
+    AutomationConditions:
+      type: object
+      additionalProperties: false
+      description: >-
+        Условия применения правила (конъюнкция). Отсутствует/пусто = wildcard;
+        пустой объект = ко всем заявкам триггера. keywords — подстрочный
+        case-insensitive матчинг по subject/description.
+      properties:
+        types:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketType'
+        priorities:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketPriority'
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketChannel'
+        keywords:
+          type: array
+          items:
+            type: string
+    AssignActionParams:
+      type: object
+      additionalProperties: false
+      required:
+      - strategy
+      properties:
+        strategy:
+          type: string
+          enum: [direct, round_robin, least_load]
+        operator_id:
+          type: string
+          format: uuid
+          description: Требуется при strategy=direct.
+        team:
+          $ref: '#/components/schemas/TicketTeam'
+        pool:
+          type: array
+          description: 'Явный пул операторов (seam до platform-источника, #77).'
+          items:
+            type: string
+            format: uuid
+    SetStatusActionParams:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/TicketStatus'
+    SetPriorityActionParams:
+      type: object
+      additionalProperties: false
+      required: [priority]
+      properties:
+        priority:
+          $ref: '#/components/schemas/TicketPriority'
+    AddTagActionParams:
+      type: object
+      additionalProperties: false
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          minItems: 1
+          items:
+            type: string
+    EscalateActionParams:
+      type: object
+      additionalProperties: false
+      properties:
+        team:
+          $ref: '#/components/schemas/TicketTeam'
+    NotifyActionParams:
+      type: object
+      additionalProperties: false
+      required: [recipient]
+      description: 'seam: доставка уведомлений — E7 (config-gated, ADR-0008 Реш.3).'
+      properties:
+        recipient:
+          type: string
+          enum: [requester, assignee, supervisor, team]
+        channel:
+          type: string
+        template:
+          type: string
+    CreateServiceOrderActionParams:
+      type: object
+      additionalProperties: false
+      description: 'seam: заказ коллаборанта — platform/#77 (config-gated).'
+      properties:
+        collaborator_category:
+          type: string
+        premises_id:
+          type: string
+          format: uuid
+    AssignAction:
+      type: object
+      additionalProperties: false
+      required: [action, params]
+      properties:
+        action:
+          type: string
+          enum: [assign]
+        params:
+          $ref: '#/components/schemas/AssignActionParams'
+    SetStatusAction:
+      type: object
+      additionalProperties: false
+      required: [action, params]
+      properties:
+        action:
+          type: string
+          enum: [set_status]
+        params:
+          $ref: '#/components/schemas/SetStatusActionParams'
+    SetPriorityAction:
+      type: object
+      additionalProperties: false
+      required: [action, params]
+      properties:
+        action:
+          type: string
+          enum: [set_priority]
+        params:
+          $ref: '#/components/schemas/SetPriorityActionParams'
+    AddTagAction:
+      type: object
+      additionalProperties: false
+      required: [action, params]
+      properties:
+        action:
+          type: string
+          enum: [add_tag]
+        params:
+          $ref: '#/components/schemas/AddTagActionParams'
+    EscalateAction:
+      type: object
+      additionalProperties: false
+      required: [action, params]
+      properties:
+        action:
+          type: string
+          enum: [escalate]
+        params:
+          $ref: '#/components/schemas/EscalateActionParams'
+    NotifyAction:
+      type: object
+      additionalProperties: false
+      required: [action, params]
+      properties:
+        action:
+          type: string
+          enum: [notify]
+        params:
+          $ref: '#/components/schemas/NotifyActionParams'
+    CreateServiceOrderAction:
+      type: object
+      additionalProperties: false
+      required: [action, params]
+      properties:
+        action:
+          type: string
+          enum: [create_service_order]
+        params:
+          $ref: '#/components/schemas/CreateServiceOrderActionParams'
+    AutomationAction:
+      oneOf:
+      - $ref: '#/components/schemas/AssignAction'
+      - $ref: '#/components/schemas/SetStatusAction'
+      - $ref: '#/components/schemas/SetPriorityAction'
+      - $ref: '#/components/schemas/AddTagAction'
+      - $ref: '#/components/schemas/EscalateAction'
+      - $ref: '#/components/schemas/NotifyAction'
+      - $ref: '#/components/schemas/CreateServiceOrderAction'
+      discriminator:
+        propertyName: action
+        mapping:
+          assign: '#/components/schemas/AssignAction'
+          set_status: '#/components/schemas/SetStatusAction'
+          set_priority: '#/components/schemas/SetPriorityAction'
+          add_tag: '#/components/schemas/AddTagAction'
+          escalate: '#/components/schemas/EscalateAction'
+          notify: '#/components/schemas/NotifyAction'
+          create_service_order: '#/components/schemas/CreateServiceOrderAction'
     AutomationRule:
       type: object
       required:
       - id
       - name
       - trigger
+      - conditions
       - actions
+      - is_active
+      - order
       properties:
         id:
           type: string
@@ -2311,43 +2576,22 @@ components:
         name:
           type: string
         trigger:
-          type: string
-          enum:
-          - on_create
-          - on_update
-          - on_sla_breach
-          - time_based
+          $ref: '#/components/schemas/AutomationTrigger'
         conditions:
-          type: object
-          description: Условия (тип, приоритет, канал, ключевые слова)
-          additionalProperties: true
+          $ref: '#/components/schemas/AutomationConditions'
         actions:
           type: array
-          description: 'Действия: назначить, сменить статус, тег, уведомить, эскалировать'
           items:
-            type: object
-            properties:
-              action:
-                type: string
-                enum:
-                - assign
-                - set_status
-                - set_priority
-                - add_tag
-                - notify
-                - escalate
-                - create_service_order
-              params:
-                type: object
-                additionalProperties: true
+            $ref: '#/components/schemas/AutomationAction'
         is_active:
           type: boolean
           default: true
         order:
           type: integer
-          description: Порядок применения
+          description: Порядок применения (asc; конфликт = last-write-wins).
     AutomationRuleInput:
       type: object
+      additionalProperties: false
       required:
       - name
       - trigger
@@ -2355,24 +2599,43 @@ components:
       properties:
         name:
           type: string
+          minLength: 1
+          maxLength: 200
         trigger:
-          type: string
-          enum:
-          - on_create
-          - on_update
-          - on_sla_breach
-          - time_based
+          $ref: '#/components/schemas/AutomationTrigger'
         conditions:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/AutomationConditions'
         actions:
           type: array
+          minItems: 1
           items:
-            type: object
-            additionalProperties: true
+            $ref: '#/components/schemas/AutomationAction'
         is_active:
           type: boolean
           default: true
+        order:
+          type: integer
+          default: 0
+    AutomationRuleUpdate:
+      type: object
+      additionalProperties: false
+      description: Частичное обновление правила (только переданные поля).
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        trigger:
+          $ref: '#/components/schemas/AutomationTrigger'
+        conditions:
+          $ref: '#/components/schemas/AutomationConditions'
+        actions:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/AutomationAction'
+        is_active:
+          type: boolean
         order:
           type: integer
     SupportStats:

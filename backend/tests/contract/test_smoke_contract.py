@@ -298,6 +298,52 @@ def test_sla_policy_responses_conform(admin_client: TestClient) -> None:
 
 
 @requires_postgres
+def test_automation_rule_responses_conform(admin_client: TestClient) -> None:
+    """AT-002: create/get/patch/list automation-rules соответствуют AutomationRule (#104).
+
+    Правило несёт несколько типов действий → валидирует дискриминированный union
+    AutomationAction (oneOf) в ответе."""
+    create = admin_client.post(
+        "/api/v1/support/automation-rules",
+        json={
+            "name": "contract rule",
+            "trigger": "on_create",
+            "conditions": {
+                "types": ["FRAUD"],
+                "priorities": ["critical"],
+                "channels": ["AI_CHAT"],
+                "keywords": ["fraud"],
+            },
+            "actions": [
+                {"action": "set_priority", "params": {"priority": "critical"}},
+                {"action": "assign", "params": {"strategy": "least_load", "team": "legal"}},
+                {"action": "escalate", "params": {}},
+                {"action": "add_tag", "params": {"tags": ["auto"]}},
+                {"action": "notify", "params": {"recipient": "supervisor"}},
+            ],
+            "order": 3,
+        },
+    )
+    assert create.status_code == 201, create.text
+    assert_response_conforms("/api/v1/support/automation-rules", "post", "201", create.json())
+    rule_id = create.json()["data"]["id"]
+
+    got = admin_client.get(f"/api/v1/support/automation-rules/{rule_id}")
+    assert got.status_code == 200
+    assert_response_conforms("/api/v1/support/automation-rules/{id}", "get", "200", got.json())
+
+    patched = admin_client.patch(f"/api/v1/support/automation-rules/{rule_id}", json={"order": 8})
+    assert patched.status_code == 200
+    assert_response_conforms(
+        "/api/v1/support/automation-rules/{id}", "patch", "200", patched.json()
+    )
+
+    listed = admin_client.get("/api/v1/support/automation-rules")
+    assert listed.status_code == 200
+    assert_response_conforms("/api/v1/support/automation-rules", "get", "200", listed.json())
+
+
+@requires_postgres
 def test_ticket_exposes_sla_state(operator_client: TestClient) -> None:
     """AT-002 (#89): ответ getTicket несёт sla_state из домена SlaState и конформен."""
     created = operator_client.post(
