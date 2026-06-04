@@ -10,6 +10,9 @@ from __future__ import annotations
 import datetime
 import uuid
 
+import pytest
+
+from api.sla.worker import scan as scan_mod
 from api.sla.worker.hooks import BreachHook, SlaBreachEvent
 from api.sla.worker.scan import escalate, scan_and_escalate, select_due_tickets
 from api.tickets.enums import TicketStatus
@@ -109,6 +112,7 @@ def test_select_due_tickets_predicate_and_order() -> None:
     assert "first_response_due_at" in sql
     assert "NOT IN" in sql  # терминальные статусы исключены
     assert "ORDER BY" in sql
+    assert "least" in sql.lower()  # порядок по ранней из двух ног (не NULLS LAST)
     assert "LIMIT" in sql
 
 
@@ -140,3 +144,22 @@ async def test_scan_and_escalate_uses_query_then_escalates() -> None:
     result = await scan_and_escalate(session, now=NOW, hook=hook, batch_limit=10)  # type: ignore[arg-type]
     assert len(session.statements) == 1
     assert [e.number for e in result] == ["SUP-7"]
+
+
+async def test_scan_warns_when_batch_saturated(monkeypatch: pytest.MonkeyPatch) -> None:
+    # len(rows) == batch_limit → проход насыщён → WARN (no silent caps).
+    events, hook = await _collect()
+    rows = [_ticket(number=f"SUP-{i}", resolution_due_at=_PAST) for i in range(3)]
+    warnings: list[object] = []
+    monkeypatch.setattr(scan_mod._logger, "warning", lambda msg, *a: warnings.append((msg, a)))
+    await scan_and_escalate(_Session(rows), now=NOW, hook=hook, batch_limit=3)  # type: ignore[arg-type]
+    assert len(warnings) == 1
+
+
+async def test_scan_no_warn_below_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    events, hook = await _collect()
+    rows = [_ticket(number="SUP-1", resolution_due_at=_PAST)]
+    warnings: list[object] = []
+    monkeypatch.setattr(scan_mod._logger, "warning", lambda msg, *a: warnings.append(msg))
+    await scan_and_escalate(_Session(rows), now=NOW, hook=hook, batch_limit=10)  # type: ignore[arg-type]
+    assert warnings == []

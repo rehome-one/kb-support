@@ -14,14 +14,17 @@ from __future__ import annotations
 import datetime
 from collections.abc import Callable, Iterable
 
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.observability.logging import get_logger
 from api.sla.worker.hooks import BreachHook, SlaBreachEvent
 from api.tickets.enums import TicketStatus
 from api.tickets.models import Ticket
 from api.tickets.sla_query import first_response_breached_clause, resolution_breached_clause
 from api.tickets.sla_state import is_first_response_breached, is_resolution_breached
+
+_logger = get_logger("sla.worker")
 
 # Терминальные статусы: заявка уже не требует проактивной эскалации.
 _TERMINAL_STATUSES = (TicketStatus.RESOLVED.value, TicketStatus.CLOSED.value)
@@ -37,14 +40,22 @@ def _never_handled(_ticket: Ticket) -> bool:
 
 
 def select_due_tickets(now: datetime.datetime, *, batch_limit: int) -> Select[tuple[Ticket]]:
-    """Активные заявки с нарушенным дедлайном (любая нога). Детерминированный порядок."""
+    """Активные заявки с нарушенным дедлайном (любая нога). Детерминированный порядок.
+
+    Сортировка по ранней из двух ног (`LEAST` игнорирует NULL): иначе заявки с
+    first-response-only breach (resolution_due_at = NULL) уходили бы в хвост NULLS LAST
+    и систематически вытеснялись бы за `batch_limit`.
+    """
     return (
         select(Ticket)
         .where(
             Ticket.status.notin_(_TERMINAL_STATUSES),
             or_(resolution_breached_clause(now), first_response_breached_clause(now)),
         )
-        .order_by(Ticket.resolution_due_at.asc(), Ticket.id.asc())
+        .order_by(
+            func.least(Ticket.resolution_due_at, Ticket.first_response_due_at).asc(),
+            Ticket.id.asc(),
+        )
         .limit(batch_limit)
     )
 
@@ -99,4 +110,8 @@ async def scan_and_escalate(
     """Выбрать заявки с просроченными дедлайнами из БД и эскалировать каждую."""
     result = await session.execute(select_due_tickets(now, batch_limit=batch_limit))
     rows = list(result.scalars().all())
+    if len(rows) == batch_limit:
+        # No silent caps: проход насыщён, часть просроченных заявок отложена до
+        # следующего скана. Сигнализируем, чтобы усечение не выглядело «всё покрыто».
+        _logger.warning("sla_scan batch saturated limit=%s — остаток отложен", batch_limit)
     return await escalate(rows, now, hook=hook, already_handled=already_handled)
