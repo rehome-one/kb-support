@@ -21,6 +21,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.system_actors import AUTOMATION_ACTOR_ID
+from api.automation.assignment import resolve_assignee
 from api.automation.enums import AssignStrategy, AutomationActionType
 from api.automation.metrics import record_action_deferred, record_rule_failure
 from api.automation.schemas import (
@@ -49,29 +50,44 @@ def _audit_extra(rule_id: uuid.UUID) -> dict[str, str]:
     return {"automation_rule_id": str(rule_id)}
 
 
+def _deferred_reason(strategy: AssignStrategy) -> str:
+    """Канонический лейбл метрики недо-резолва assign (один на стратегию, без дрейфа)."""
+    return f"strategy_{strategy.value}_no_pool"
+
+
 async def _exec_assign(
     session: AsyncSession, ticket: Ticket, params: Mapping[str, Any], rule_id: uuid.UUID
 ) -> None:
     parsed = AssignParams.model_validate(params)
-    if parsed.strategy != AssignStrategy.DIRECT:
-        # round_robin/least_load: резолвер пула операторов — #109 (platform/#77).
-        # Наблюдаемый недо-резолв (не тихий пропуск): warning + метрика.
-        _logger.warning(
-            "automation_assign_strategy_deferred rule_id=%s strategy=%s ticket_id=%s",
-            rule_id,
-            parsed.strategy.value,
-            ticket.id,
+    if parsed.strategy is AssignStrategy.DIRECT:
+        if parsed.operator_id is None:  # защитно — cross-field валидатор это гарантирует
+            raise ValueError("assign.direct без operator_id")
+        assignee_id: uuid.UUID = parsed.operator_id
+    else:
+        # round_robin/least_load (#109): резолв из пула (seam #77). Пул задаёт валидатор
+        # через team; источник операторов — params.pool до platform-источника #77.
+        resolved = await resolve_assignee(
+            session,
+            strategy=parsed.strategy,
+            team=parsed.team,  # стратегия требует team (валидатор AssignParams)
+            pool=parsed.pool,
+            current_ticket_id=ticket.id,
         )
-        record_action_deferred(
-            action="assign", reason=f"strategy_{parsed.strategy.value}_unresolved"
-        )
-        return
-    if parsed.operator_id is None:  # защитно — cross-field валидатор это гарантирует
-        raise ValueError("assign.direct без operator_id")
+        if resolved is None:
+            # Пул не задан/пуст → наблюдаемый недо-резолв (не тихий пропуск): warning + метрика.
+            _logger.warning(
+                "automation_assign_strategy_deferred rule_id=%s strategy=%s ticket_id=%s",
+                rule_id,
+                parsed.strategy.value,
+                ticket.id,
+            )
+            record_action_deferred(action="assign", reason=_deferred_reason(parsed.strategy))
+            return
+        assignee_id = resolved
     await TicketActionService(session).assign(
         ticket,
         AUTOMATION_ACTOR_ID,
-        assignee_id=parsed.operator_id,
+        assignee_id=assignee_id,
         team=parsed.team,
         extra=_audit_extra(rule_id),
     )
