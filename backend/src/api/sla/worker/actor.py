@@ -15,12 +15,12 @@ import dramatiq
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from api.automation.sla_breach import make_sla_breach_hook
 from api.config import get_settings
 from api.observability.logging import get_logger
 
 # Импорт настраивает глобальный broker Dramatiq до объявления actor'а.
 from api.sla.worker import broker as _broker  # noqa: F401
-from api.sla.worker.hooks import on_sla_breach
 from api.sla.worker.scan import scan_and_escalate
 
 _logger = get_logger("sla.worker")
@@ -30,8 +30,11 @@ async def _scan_once() -> int:
     """Один проход скана со СВОИМ engine/NullPool.
 
     Свой engine (не модульный `api.db.engine`, привязанный к loop импорта) — иначе
-    cross-loop asyncpg «Event loop is closed» (урок #85). E4 не пишет в БД (маркер
-    дедупа — E5), поэтому commit не нужен. Engine диспозится в конце прохода.
+    cross-loop asyncpg «Event loop is closed» (урок #85). С #108 хук эскалации
+    (`make_sla_breach_hook`) прогоняет on_sla_breach-правила, которые МУТИРУЮТ заявку
+    (статус/история) → проход коммитит; сбой commit'а логируется и откатывается (не
+    висит на NullPool-движке). Engine диспозится в конце прохода. Без broker (StubBroker,
+    config-gate по пустому `sla_worker_broker_url`) actor не enqueue'ится — путь инертен.
     """
     settings = get_settings()
     engine = create_async_engine(settings.database_url, poolclass=NullPool)
@@ -41,9 +44,15 @@ async def _scan_once() -> int:
             events = await scan_and_escalate(
                 session,
                 now=datetime.datetime.now(datetime.UTC),
-                hook=on_sla_breach,
+                hook=make_sla_breach_hook(session),
                 batch_limit=settings.sla_scan_batch_limit,
             )
+            try:
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                _logger.error("sla_scan commit failed — проход откачен", exc_info=True)
+                raise
         return len(events)
     finally:
         await engine.dispose()
