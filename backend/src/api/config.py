@@ -139,6 +139,21 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- kb-wiki (E6-5, #129, ADR-0009 Решение 3). Провизорный контракт; read-only
+    # (проверка существования статьи по slug). ПУСТОЙ kb_wiki_api_token = интеграция
+    # выключена (slug принимается без валидации; инертно до #77). ---
+    kb_wiki_api_base_url: str = Field(
+        default="http://localhost:8083",
+        description="Базовый URL kb-wiki API (статьи базы знаний, read-only).",
+    )
+    kb_wiki_api_token: str = Field(
+        default="",
+        description=(
+            "m2m-токен для StaticTokenProvider (dev/test). ПУСТО → kb-wiki выключен "
+            "(slug не валидируется). Реальный ClientCredentials — #77."
+        ),
+    )
+
     # --- SLA-воркер (E4-6, #90, ADR-0007 Решение 1). Dramatiq-actor проактивно
     # сканирует БД по дедлайнам и дёргает breach-хук (seam под эскалацию E5/#18).
     # ПУСТОЙ sla_worker_broker_url = выключено (StubBroker, actor инертен) — тот же

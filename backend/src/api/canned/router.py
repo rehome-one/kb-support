@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal
+from api.canned.deps import get_kb_wiki_client
 from api.canned.render import build_local_variables, render_template
 from api.canned.repository import CannedResponseRepository
 from api.canned.schemas import (
@@ -28,6 +29,7 @@ from api.canned.schemas import (
     CannedResponseRead,
     CannedResponseUpdate,
 )
+from api.clients.kb_wiki import KbWikiClient
 from api.clients.platform import PlatformClient
 from api.db import get_session
 from api.errors import ProblemException
@@ -48,6 +50,20 @@ def _require_support(principal: Principal) -> None:
     """RBAC: CRUD шаблонов — скоуп `staff_support`, иначе 403 (FR-5.1, ADR-0009)."""
     if not principal.is_staff_support:
         raise ProblemException.forbidden(detail="Staff support scope required")
+
+
+async def _validate_linked_article(kb_wiki: KbWikiClient | None, slug: str | None) -> None:
+    """Проверить существование статьи kb-wiki по slug (FR-5.3, #129).
+
+    Config-gated: kb-wiki выключен (None) или slug отсутствует → пропуск (slug принимается).
+    `False` (подтверждённо нет, 404) → 422; `None`/`True` (деградация или есть) → принять
+    (недоступность соседа не блокирует сохранение шаблона, AT-003)."""
+    if kb_wiki is None or slug is None:
+        return
+    if await kb_wiki.article_exists(slug) is False:
+        raise ProblemException.unprocessable(
+            detail="linked_article_slug does not reference an existing kb-wiki article"
+        )
 
 
 def _resolve_request_id(raw: str | None) -> uuid.UUID:
@@ -114,9 +130,11 @@ async def create_canned_response(
     payload: CannedResponseInput,
     principal: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_session),
+    kb_wiki: KbWikiClient | None = Depends(get_kb_wiki_client),
     x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
 ) -> CannedResponseEnvelope:
     _require_support(principal)
+    await _validate_linked_article(kb_wiki, payload.linked_article_slug)
     canned = await CannedResponseRepository(session).create(_create_values(payload))
     await session.commit()
     await session.refresh(canned)
@@ -199,6 +217,7 @@ async def update_canned_response(
     payload: CannedResponseUpdate,
     principal: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_session),
+    kb_wiki: KbWikiClient | None = Depends(get_kb_wiki_client),
     x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
 ) -> CannedResponseEnvelope:
     _require_support(principal)
@@ -206,6 +225,9 @@ async def update_canned_response(
     canned = await repository.get(canned_id)
     if canned is None:
         raise ProblemException.not_found(detail="Canned response not found")
+    # Валидируем slug только если он передан в PATCH (FR-5.3, #129).
+    if "linked_article_slug" in payload.model_fields_set:
+        await _validate_linked_article(kb_wiki, payload.linked_article_slug)
     canned = await repository.update(canned, _update_changes(payload))
     await session.commit()
     await session.refresh(canned)
