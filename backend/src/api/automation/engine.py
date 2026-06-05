@@ -20,7 +20,7 @@ in-memory атрибуты сбойного действия.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
@@ -47,6 +47,7 @@ async def run_rules(session: AsyncSession, ticket: Ticket, trigger: str) -> None
             ticket_type=ticket.type,
             ticket_priority=ticket.priority,
             ticket_channel=ticket.channel,
+            ticket_status=ticket.status,
             ticket_text=ticket_text,
         )
     except Exception:
@@ -59,8 +60,24 @@ async def run_rules(session: AsyncSession, ticket: Ticket, trigger: str) -> None
         )
         return
     for rule in matched:
-        for action in rule.actions:
-            await _run_action_isolated(session, ticket, action, rule_id=rule.id, trigger=trigger)
+        await run_actions(session, ticket, rule.actions, rule_id=rule.id, trigger=trigger)
+
+
+async def run_actions(
+    session: AsyncSession,
+    ticket: Ticket,
+    actions: Iterable[Mapping[str, Any]],
+    *,
+    rule_id: uuid.UUID,
+    trigger: str,
+) -> None:
+    """Исполнить действия ОДНОГО правила, каждое в SAVEPOINT-изоляции (best-effort).
+
+    Извлечено из `run_rules` для переиспользования сканом time_based (#110) без импорта
+    приватного `_run_action_isolated`. Вызывается per-rule (сохраняет `rule_id` в
+    метриках/логах). Не пробрасывает (ADR-0008 Реш.4)."""
+    for action in actions:
+        await _run_action_isolated(session, ticket, action, rule_id=rule_id, trigger=trigger)
 
 
 async def _run_action_isolated(

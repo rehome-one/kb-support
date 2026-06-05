@@ -50,13 +50,22 @@ def conditions_match(
     ticket_type: str,
     ticket_priority: str,
     ticket_channel: str,
+    ticket_status: str,
     ticket_text: str,
 ) -> bool:
-    """Подходит ли заявка под `conditions` (конъюнкция; пустой `{}` = catch-all)."""
+    """Подходит ли заявка под `conditions` (конъюнкция; пустой `{}` = catch-all).
+
+    `statuses` — статич. измерение (как types/priorities/channels), применимо ко ВСЕМ
+    триггерам (#110): на on_create/on_update проверяется текущий статус заявки, на
+    time_based — статус кандидата скана. Временные поля (`inactive_minutes`/
+    `unanswered_minutes`) здесь НЕ оцениваются — они относительны и считаются только
+    сканом time_based (`api.automation.time_based`), матчер остаётся чистым (без часов).
+    """
     return (
         _dimension_ok(conditions.get("types"), ticket_type)
         and _dimension_ok(conditions.get("priorities"), ticket_priority)
         and _dimension_ok(conditions.get("channels"), ticket_channel)
+        and _dimension_ok(conditions.get("statuses"), ticket_status)
         and _keywords_ok(conditions.get("keywords"), ticket_text)
     )
 
@@ -67,6 +76,7 @@ def select_matching_rules(
     ticket_type: str,
     ticket_priority: str,
     ticket_channel: str,
+    ticket_status: str,
     ticket_text: str,
 ) -> list[AutomationRule]:
     """Все правила, чьи `conditions` подходят заявке, в исходном порядке (apply_order).
@@ -82,6 +92,7 @@ def select_matching_rules(
             ticket_type=ticket_type,
             ticket_priority=ticket_priority,
             ticket_channel=ticket_channel,
+            ticket_status=ticket_status,
             ticket_text=ticket_text,
         )
     ]

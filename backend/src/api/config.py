@@ -160,6 +160,20 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- time_based-автоматизация (E5, #110, ADR-0008 Реш.6). Dramatiq-actor
+    # `check_time_based_rules` сканирует БД по временным условиям правил и применяет
+    # действия. Config-gate — ТОТ ЖЕ `sla_worker_broker_url` (единый Dramatiq-broker на
+    # сервис, оба actor'а); пусто → StubBroker → actor инертен. Боевой путь — после ops
+    # (#79). Источник истины — БД (NFR-3.2), восстановление сканом, не из памяти. ---
+    automation_scan_batch_limit: int = Field(
+        default=500,
+        ge=1,
+        description=(
+            "Максимум заявок за один проход скана time_based-правил (на правило). Защита "
+            "от чрезмерной выборки; выборка детерминирована (ORDER BY updated_at, id)."
+        ),
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

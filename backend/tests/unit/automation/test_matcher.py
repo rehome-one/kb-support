@@ -19,6 +19,7 @@ def _match(conditions: dict[str, Any], **over: str) -> bool:
         "ticket_type": "FRAUD",
         "ticket_priority": "critical",
         "ticket_channel": "AI_CHAT",
+        "ticket_status": "PENDING",
         "ticket_text": "тема заявки\nописание заявки",
     }
     base.update(over)
@@ -46,6 +47,14 @@ def test_priority_and_channel_dimensions() -> None:
     assert _match({"priorities": ["low"]}) is False
     assert _match({"channels": ["AI_CHAT"]}) is True
     assert _match({"channels": ["EMAIL"]}) is False
+
+
+def test_status_dimension_membership_and_wildcard() -> None:
+    # statuses — статич. измерение (#110), как types/priorities/channels.
+    assert _match({"statuses": ["PENDING"]}) is True
+    assert _match({"statuses": ["OPEN"]}) is False
+    assert _match({"statuses": []}) is True  # пусто = wildcard
+    assert _match({}, ticket_status="OPEN") is True  # отсутствует = wildcard
 
 
 def test_empty_or_missing_dimension_is_wildcard() -> None:
@@ -111,6 +120,7 @@ def test_select_returns_matching_in_order() -> None:
         ticket_type="FRAUD",
         ticket_priority="critical",
         ticket_channel="AI_CHAT",
+        ticket_status="PENDING",
         ticket_text="t\nd",
     )
     assert [r.name for r in selected] == ["a", "c"]
@@ -123,6 +133,7 @@ def test_select_empty_input() -> None:
             ticket_type="FRAUD",
             ticket_priority="critical",
             ticket_channel="AI_CHAT",
+            ticket_status="PENDING",
             ticket_text="t",
         )
         == []

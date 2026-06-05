@@ -34,6 +34,7 @@ def _ticket(**over: Any) -> Any:
         "type": "FRAUD",
         "priority": "critical",
         "channel": "AI_CHAT",
+        "status": "PENDING",
     }
     base.update(over)
     return SimpleNamespace(**base)
