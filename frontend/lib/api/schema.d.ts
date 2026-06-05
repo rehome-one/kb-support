@@ -1001,12 +1001,17 @@ export interface components {
         };
         /** @enum {string} */
         AutomationTrigger: "on_create" | "on_update" | "on_sla_breach" | "time_based";
-        /** @description Условия применения правила (конъюнкция). Отсутствует/пусто = wildcard; пустой объект = ко всем заявкам триггера. keywords — подстрочный case-insensitive матчинг по subject/description. */
+        /** @description Условия применения правила (конъюнкция). Отсутствует/пусто = wildcard; пустой объект = ко всем заявкам триггера. keywords — подстрочный case-insensitive матчинг по subject/description. Статич. измерения (types/priorities/channels/statuses/keywords) применимы ко всем триггерам. Временные пороги (inactive_minutes/unanswered_minutes) применимы ТОЛЬКО при trigger=time_based и вычисляются периодическим сканом (источник истины — БД). */
         AutomationConditions: {
             types?: components["schemas"]["TicketType"][];
             priorities?: components["schemas"]["TicketPriority"][];
             channels?: components["schemas"]["TicketChannel"][];
+            statuses?: components["schemas"]["TicketStatus"][];
             keywords?: string[];
+            /** @description time_based: заявка без активности (по updated_at) не менее N минут. Допустимо только при trigger=time_based. */
+            inactive_minutes?: number;
+            /** @description time_based: заявка без первого ответа (first_responded_at IS NULL) и создана не менее N минут назад. Допустимо только при trigger=time_based. */
+            unanswered_minutes?: number;
         };
         AssignActionParams: {
             /** @enum {string} */

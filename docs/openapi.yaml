@@ -2378,7 +2378,10 @@ components:
       description: >-
         Условия применения правила (конъюнкция). Отсутствует/пусто = wildcard;
         пустой объект = ко всем заявкам триггера. keywords — подстрочный
-        case-insensitive матчинг по subject/description.
+        case-insensitive матчинг по subject/description. Статич. измерения
+        (types/priorities/channels/statuses/keywords) применимы ко всем триггерам.
+        Временные пороги (inactive_minutes/unanswered_minutes) применимы ТОЛЬКО при
+        trigger=time_based и вычисляются периодическим сканом (источник истины — БД).
       properties:
         types:
           type: array
@@ -2392,10 +2395,26 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TicketChannel'
+        statuses:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketStatus'
         keywords:
           type: array
           items:
             type: string
+        inactive_minutes:
+          type: integer
+          minimum: 1
+          description: >-
+            time_based: заявка без активности (по updated_at) не менее N минут.
+            Допустимо только при trigger=time_based.
+        unanswered_minutes:
+          type: integer
+          minimum: 1
+          description: >-
+            time_based: заявка без первого ответа (first_responded_at IS NULL) и
+            создана не менее N минут назад. Допустимо только при trigger=time_based.
     AssignActionParams:
       type: object
       additionalProperties: false

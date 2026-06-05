@@ -343,6 +343,48 @@ def test_automation_rule_responses_conform(admin_client: TestClient) -> None:
     assert_response_conforms("/api/v1/support/automation-rules", "get", "200", listed.json())
 
 
+def test_time_based_rule_conditions_conform(admin_client: TestClient) -> None:
+    """AT-002 (#110): time_based-правило с новыми полями conditions (statuses/inactive_minutes/
+    unanswered_minutes) принимается и конформит AutomationRule."""
+    create = admin_client.post(
+        "/api/v1/support/automation-rules",
+        json={
+            "name": "time-based contract rule",
+            "trigger": "time_based",
+            "conditions": {
+                "statuses": ["PENDING"],
+                "inactive_minutes": 4320,
+                "unanswered_minutes": 60,
+            },
+            "actions": [{"action": "set_status", "params": {"status": "CLOSED"}}],
+        },
+    )
+    assert create.status_code == 201, create.text
+    assert_response_conforms("/api/v1/support/automation-rules", "post", "201", create.json())
+    body = create.json()["data"]
+    assert body["conditions"]["statuses"] == ["PENDING"]
+    assert body["conditions"]["inactive_minutes"] == 4320
+
+    rule_id = body["id"]
+    got = admin_client.get(f"/api/v1/support/automation-rules/{rule_id}")
+    assert got.status_code == 200
+    assert_response_conforms("/api/v1/support/automation-rules/{id}", "get", "200", got.json())
+
+
+def test_time_field_rejected_on_non_time_based_trigger(admin_client: TestClient) -> None:
+    """#110 footgun: временные поля на trigger≠time_based → 422 (валидатор схемы)."""
+    resp = admin_client.post(
+        "/api/v1/support/automation-rules",
+        json={
+            "name": "bad rule",
+            "trigger": "on_create",
+            "conditions": {"inactive_minutes": 60},
+            "actions": [{"action": "add_tag", "params": {"tags": ["x"]}}],
+        },
+    )
+    assert resp.status_code == 422, resp.text
+
+
 @requires_postgres
 def test_ticket_exposes_sla_state(operator_client: TestClient) -> None:
     """AT-002 (#89): ответ getTicket несёт sla_state из домена SlaState и конформен."""

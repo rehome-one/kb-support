@@ -34,14 +34,47 @@ class AutomationConditions(BaseModel):
 
     Все поля опциональны; None/пустой список = wildcard (условие не ограничивает).
     Пустой объект = правило применяется ко всем заявкам триггера. keywords —
-    подстрочный case-insensitive матчинг по subject/description (ADR-0008 Реш.2, #105)."""
+    подстрочный case-insensitive матчинг по subject/description (ADR-0008 Реш.2, #105).
+
+    **Статич. измерения** (types/priorities/channels/statuses/keywords) — матчер #105,
+    применимы ко всем триггерам. **Временные поля** (`inactive_minutes`/
+    `unanswered_minutes`, #110) относительны и вычисляются ТОЛЬКО периодическим сканом
+    `time_based` (`api.automation.time_based`); на прочих триггерах бессмысленны и
+    отклоняются валидатором конверта (footgun-защита)."""
 
     model_config = ConfigDict(extra="forbid")
 
     types: list[TicketType] | None = None
     priorities: list[TicketPriority] | None = None
     channels: list[TicketChannel] | None = None
+    statuses: list[TicketStatus] | None = None
     keywords: list[str] | None = None
+    # Временные пороги time_based (#110). Анкоры: inactive → updated_at (N мин без
+    # активности); unanswered → first_responded_at IS NULL и created_at старше N мин.
+    inactive_minutes: int | None = Field(default=None, ge=1)
+    unanswered_minutes: int | None = Field(default=None, ge=1)
+
+
+def _validate_time_conditions(
+    trigger: AutomationTrigger | None, conditions: AutomationConditions | None
+) -> None:
+    """Временные поля conditions допустимы лишь при trigger=time_based (#110, footgun).
+
+    На Update trigger может отсутствовать (частичное обновление) — тогда проверку
+    пропускаем (триггер правила не меняется; скан всё равно игнорирует временные поля
+    на не-time_based)."""
+    if trigger is None or conditions is None:
+        return
+    has_time = conditions.inactive_minutes is not None or conditions.unanswered_minutes is not None
+    if trigger == AutomationTrigger.TIME_BASED:
+        if not has_time:
+            # Без временного порога правило матчило бы все заявки каждый проход скана.
+            raise ValueError("time_based требует inactive_minutes или unanswered_minutes")
+        return
+    if has_time:
+        raise ValueError(
+            "inactive_minutes/unanswered_minutes допустимы только при trigger=time_based"
+        )
 
 
 # --- Параметры действий (per-action params, ADR-0008 Реш.1) ---
@@ -179,6 +212,11 @@ class AutomationRuleInput(BaseModel):
     is_active: bool = True
     order: int = 0
 
+    @model_validator(mode="after")
+    def _check_time_conditions(self) -> AutomationRuleInput:
+        _validate_time_conditions(self.trigger, self.conditions)
+        return self
+
 
 class AutomationRuleUpdate(BaseModel):
     """Тело PATCH /automation-rules/{id} — частичное обновление. Лишние поля запрещены."""
@@ -191,6 +229,11 @@ class AutomationRuleUpdate(BaseModel):
     actions: list[AutomationActionModel] | None = Field(default=None, min_length=1)
     is_active: bool | None = None
     order: int | None = None
+
+    @model_validator(mode="after")
+    def _check_time_conditions(self) -> AutomationRuleUpdate:
+        _validate_time_conditions(self.trigger, self.conditions)
+        return self
 
 
 class AutomationRuleRead(BaseModel):
