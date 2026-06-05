@@ -30,3 +30,12 @@ class OperatorReply:
     message_id: uuid.UUID
     body: str
     sent_at: datetime.datetime
+
+
+@dataclass(frozen=True)
+class ArticleSuggestion:
+    """Предложенная статья базы знаний (E6-6, #130). Без ПДн — публичный контент БЗ."""
+
+    slug: str
+    title: str
+    url: str | None

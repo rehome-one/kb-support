@@ -148,3 +148,42 @@ async def test_message_body_not_logged() -> None:
     assert warn.called
     logged = " ".join(str(arg) for call in warn.call_args_list for arg in call.args)
     assert secret not in logged
+
+
+# --- suggest_articles (E6-6, #130) ---
+
+
+async def test_suggest_returns_articles() -> None:
+    client = _make(
+        lambda req: httpx.Response(
+            200,
+            json={"results": [{"slug": "help/a", "title": "Статья A", "url": "http://w/a"}]},
+        )
+    )
+    out = await client.suggest_articles("оплата не прошла")
+    assert out is not None
+    assert [a.slug for a in out] == ["help/a"]
+    assert out[0].title == "Статья A"
+
+
+async def test_suggest_empty_results() -> None:
+    client = _make(lambda req: httpx.Response(200, json={"results": []}))
+    assert await client.suggest_articles("нет совпадений") == []
+
+
+async def test_suggest_4xx_degrades_to_none() -> None:
+    client = _make(lambda req: httpx.Response(500), attempts=1)
+    assert await client.suggest_articles("x") is None
+
+
+async def test_suggest_malformed_degrades_to_none() -> None:
+    client = _make(lambda req: httpx.Response(200, json={"unexpected": 1}))
+    assert await client.suggest_articles("x") is None
+
+
+async def test_suggest_network_error_degrades_to_none() -> None:
+    def _boom(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    client = _make(_boom, attempts=1)
+    assert await client.suggest_articles("x") is None

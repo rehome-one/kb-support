@@ -7,12 +7,13 @@
 from __future__ import annotations
 
 from api.clients.kb_search.adapter import HttpKbSearchClient
-from api.clients.kb_search.models import OperatorReply, ReplyOutcome
+from api.clients.kb_search.models import ArticleSuggestion, OperatorReply, ReplyOutcome
 from api.clients.kb_search.protocol import KbSearchClient
 
 __all__ = [
     "KbSearchClient",
     "HttpKbSearchClient",
+    "ArticleSuggestion",
     "OperatorReply",
     "ReplyOutcome",
 ]

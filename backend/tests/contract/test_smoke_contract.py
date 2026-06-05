@@ -443,6 +443,22 @@ def test_canned_render_response_conforms(support_client: TestClient) -> None:
     )
 
 
+def test_suggested_articles_response_conforms(operator_client: TestClient) -> None:
+    """AT-002 (#130): getSuggestedArticles (gated, degraded) conform SuggestedArticlesResult."""
+    created = operator_client.post(
+        "/api/v1/support/tickets", json={"subject": "оплата", "type": "PAYMENT"}
+    )
+    assert created.status_code == 201
+    ticket_id = created.json()["data"]["id"]
+
+    resp = operator_client.get(f"/api/v1/support/tickets/{ticket_id}/suggested-articles")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["degraded"] is True  # kb-search выключен в тесте
+    assert_response_conforms(
+        "/api/v1/support/tickets/{id}/suggested-articles", "get", "200", resp.json()
+    )
+
+
 @requires_postgres
 def test_ticket_exposes_sla_state(operator_client: TestClient) -> None:
     """AT-002 (#89): ответ getTicket несёт sla_state из домена SlaState и конформен."""
