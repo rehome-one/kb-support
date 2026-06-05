@@ -16,6 +16,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 import api.automation.models  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
+import api.canned.models  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
 import api.sla.models  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
 import api.tickets.history  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
 import api.tickets.messages  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
