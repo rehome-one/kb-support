@@ -53,6 +53,28 @@ class CannedResponseRead(BaseModel):
     updated_at: datetime.datetime
 
 
+class CannedRenderInput(BaseModel):
+    """Тело POST /canned-responses/{id}/render — заявка, по которой подставляются переменные."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ticket_id: uuid.UUID
+
+
+class CannedRenderResult(BaseModel):
+    """Результат рендера шаблона для заявки (текст с подставленными переменными)."""
+
+    rendered_body: str
+    linked_article_slug: str | None
+
+
+class CannedRenderEnvelope(BaseModel):
+    """Конверт ответа рендера."""
+
+    data: CannedRenderResult
+    request_id: uuid.UUID
+
+
 class CannedResponseEnvelope(BaseModel):
     """Конверт ответа с одним шаблоном (`ResponseEnvelope`)."""
 

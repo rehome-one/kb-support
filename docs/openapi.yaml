@@ -884,6 +884,48 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/support/canned-responses/{id}/render:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    post:
+      tags:
+      - Canned Responses
+      summary: Отрендерить шаблон для заявки
+      description: >-
+        Подставляет переменные шаблона по заявке (рендер на сервере — ПДн не на фронт).
+        Доступно операторам. Локальные переменные ({{ticket_number}}, {{ticket_subject}},
+        {{ticket_type}}, {{current_date}}) — всегда; {{requester_name}} — из platform
+        (config-gated, #77): при выключенной интеграции токен остаётся незаполненным.
+      operationId: renderCannedResponse
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CannedRenderInput'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/CannedRenderResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/support/sla-policies:
     get:
       tags:
@@ -2241,6 +2283,29 @@ components:
           - string
           - 'null'
           maxLength: 512
+    CannedRenderInput:
+      type: object
+      additionalProperties: false
+      required:
+      - ticket_id
+      properties:
+        ticket_id:
+          type: string
+          format: uuid
+          description: Заявка, по которой подставляются переменные.
+    CannedRenderResult:
+      type: object
+      required:
+      - rendered_body
+      properties:
+        rendered_body:
+          type: string
+          description: Текст шаблона с подставленными переменными (неизвестные — как есть).
+        linked_article_slug:
+          type:
+          - string
+          - 'null'
+          description: Связанная статья kb-wiki (для вставки ссылки оператором).
     SLAAppliesTo:
       type: object
       additionalProperties: false
