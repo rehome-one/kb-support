@@ -215,3 +215,57 @@ def test_render_not_found(client: TestClient) -> None:
         ).status_code
         == 404
     )
+
+
+# --- валидация linked_article_slug через kb-wiki (#129) ---
+
+
+class _FakeKbWiki:
+    def __init__(self, result: bool | None) -> None:
+        self._result = result
+
+    async def article_exists(self, slug: str) -> bool | None:
+        return self._result
+
+
+def _override_kb_wiki(result: bool | None) -> None:
+    from api.canned.deps import get_kb_wiki_client
+
+    app.dependency_overrides[get_kb_wiki_client] = lambda: _FakeKbWiki(result)
+
+
+def test_slug_validation_rejects_missing_article(client: TestClient) -> None:
+    from api.canned.deps import get_kb_wiki_client
+
+    _use(_SUPPORT)
+    _override_kb_wiki(False)  # kb-wiki подтверждает: статьи нет
+    try:
+        resp = client.post(
+            "/api/v1/support/canned-responses",
+            json={"title": "t", "body": "b", "linked_article_slug": "help/missing"},
+        )
+        assert resp.status_code == 422, resp.text
+    finally:
+        app.dependency_overrides.pop(get_kb_wiki_client, None)
+
+
+def test_slug_validation_accepts_existing_and_degraded(client: TestClient) -> None:
+    from api.canned.deps import get_kb_wiki_client
+
+    _use(_SUPPORT)
+    try:
+        _override_kb_wiki(True)  # статья есть → 201
+        ok = client.post(
+            "/api/v1/support/canned-responses",
+            json={"title": "t", "body": "b", "linked_article_slug": "help/exists"},
+        )
+        assert ok.status_code == 201, ok.text
+
+        _override_kb_wiki(None)  # kb-wiki недоступен (деградация) → НЕ блокируем (201)
+        degraded = client.post(
+            "/api/v1/support/canned-responses",
+            json={"title": "t2", "body": "b", "linked_article_slug": "help/whatever"},
+        )
+        assert degraded.status_code == 201, degraded.text
+    finally:
+        app.dependency_overrides.pop(get_kb_wiki_client, None)
