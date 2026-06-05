@@ -60,10 +60,11 @@ async def test_assign_strategy_deferred_is_observable(monkeypatch: pytest.Monkey
         "record_action_deferred",
         lambda **kw: deferred.append((kw["action"], kw["reason"])),
     )
-    # least_load (team задан) валиден по схеме, но резолвер пула — #109 → отложено.
+    # least_load (team задан) валиден по схеме, но БЕЗ пула (#77 не провижинен) →
+    # резолвер возвращает None → наблюдаемая отсрочка (не сбой).
     ok = await _apply({"action": "assign", "params": {"strategy": "least_load", "team": "support"}})
     assert ok is True  # недо-резолв — не сбой, а наблюдаемая отсрочка
-    assert deferred == [("assign", "strategy_least_load_unresolved")]
+    assert deferred == [("assign", "strategy_least_load_no_pool")]
 
 
 async def test_notify_seam_logs_without_pii(monkeypatch: pytest.MonkeyPatch) -> None:
