@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.principal import Principal
+from api.automation.enums import AutomationTrigger
 from api.sla.assignment import apply_sla
 from api.tickets.access import visibility_filter
 from api.tickets.enums import AccessLevel, TicketChannel, TicketPriority, TicketStatus, TicketType
@@ -104,6 +105,16 @@ class TicketRepository:
         self._session = session
         self._history = TicketHistoryRepository(session)
 
+    async def _run_automation(self, ticket: Ticket, trigger: str) -> None:
+        """Прогнать правила автоматизации (E5-5 #107) в той же транзакции (best-effort,
+        не роняет операцию заявки — ADR-0008 Реш.4/6).
+
+        Локальный импорт разрывает цикл `tickets.repository → automation.engine →
+        automation.actions → tickets.actions → tickets.repository`."""
+        from api.automation.engine import run_rules
+
+        await run_rules(self._session, ticket, trigger)
+
     async def create(self, payload: TicketCreate, principal: Principal) -> Ticket:
         """Создать заявку.
 
@@ -141,6 +152,8 @@ class TicketRepository:
             TicketHistoryAction.CREATED,
             to_value={"status": ticket.status},
         )
+        # Автоматизация on_create (#107) — после журналирования создания.
+        await self._run_automation(ticket, AutomationTrigger.ON_CREATE.value)
         return ticket
 
     async def find_active_by_chat_session(self, chat_session_id: uuid.UUID) -> Ticket | None:
@@ -215,6 +228,9 @@ class TicketRepository:
             TicketHistoryAction.CREATED,
             to_value={"status": ticket.status},
         )
+        # Автоматизация on_create (#107) — только для вновь созданной заявки
+        # (идемпотентный возврат existing выше правил не запускает).
+        await self._run_automation(ticket, AutomationTrigger.ON_CREATE.value)
         return ticket, True
 
     async def get_for_principal(self, ticket_id: uuid.UUID, principal: Principal) -> Ticket | None:
@@ -324,4 +340,6 @@ class TicketRepository:
 
         after: dict[str, Any] = {field: getattr(ticket, field) for field in _AUDITED_FIELDS}
         await record_changes(self._history, ticket.id, principal.user_id, before, after)
+        # Автоматизация on_update (#107) — после журналирования изменений оператора.
+        await self._run_automation(ticket, AutomationTrigger.ON_UPDATE.value)
         return ticket
