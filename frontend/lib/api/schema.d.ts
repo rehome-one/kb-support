@@ -336,6 +336,28 @@ export interface paths {
         patch: operations["updateCannedResponse"];
         trace?: never;
     };
+    "/api/v1/support/canned-responses/{id}/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отрендерить шаблон для заявки
+         * @description Подставляет переменные шаблона по заявке (рендер на сервере — ПДн не на фронт). Доступно операторам. Локальные переменные ({{ticket_number}}, {{ticket_subject}}, {{ticket_type}}, {{current_date}}) — всегда; {{requester_name}} — из platform (config-gated, #77): при выключенной интеграции токен остаётся незаполненным.
+         */
+        post: operations["renderCannedResponse"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/support/sla-policies": {
         parameters: {
             query?: never;
@@ -934,6 +956,19 @@ export interface components {
             title?: string;
             body?: string;
             type?: components["schemas"]["TicketType"] | null;
+            linked_article_slug?: string | null;
+        };
+        CannedRenderInput: {
+            /**
+             * Format: uuid
+             * @description Заявка, по которой подставляются переменные.
+             */
+            ticket_id: string;
+        };
+        CannedRenderResult: {
+            /** @description Текст шаблона с подставленными переменными (неизвестные — как есть). */
+            rendered_body: string;
+            /** @description Связанная статья kb-wiki (для вставки ссылки оператором). */
             linked_article_slug?: string | null;
         };
         /** @description Условия применения SLA-политики (пустой объект = применима ко всем) */
@@ -1999,6 +2034,37 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ResponseEnvelope"] & {
                         data?: components["schemas"]["CannedResponse"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    renderCannedResponse: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CannedRenderInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["CannedRenderResult"];
                     };
                 };
             };

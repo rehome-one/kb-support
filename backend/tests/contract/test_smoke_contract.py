@@ -417,6 +417,32 @@ def test_canned_response_responses_conform(support_client: TestClient) -> None:
     assert_response_conforms("/api/v1/support/canned-responses", "get", "200", listed.json())
 
 
+def test_canned_render_response_conforms(support_client: TestClient) -> None:
+    """AT-002 (#127): renderCannedResponse соответствует CannedRenderResult.
+
+    `support_client` = оператор + staff_support → один принципал покрывает и создание
+    шаблона (staff_support), и заявку/рендер (оператор). Два клиента нельзя — они делят
+    единственный `app.dependency_overrides[get_current_principal]`."""
+    canned = support_client.post(
+        "/api/v1/support/canned-responses",
+        json={"title": "t", "body": "Заявка {{ticket_number}} для {{requester_name}}"},
+    )
+    assert canned.status_code == 201, canned.text
+    cid = canned.json()["data"]["id"]
+
+    ticket = support_client.post("/api/v1/support/tickets", json={"subject": "s", "type": "OTHER"})
+    assert ticket.status_code == 201
+    ticket_id = ticket.json()["data"]["id"]
+
+    rendered = support_client.post(
+        f"/api/v1/support/canned-responses/{cid}/render", json={"ticket_id": ticket_id}
+    )
+    assert rendered.status_code == 200, rendered.text
+    assert_response_conforms(
+        "/api/v1/support/canned-responses/{id}/render", "post", "200", rendered.json()
+    )
+
+
 @requires_postgres
 def test_ticket_exposes_sla_state(operator_client: TestClient) -> None:
     """AT-002 (#89): ответ getTicket несёт sla_state из домена SlaState и конформен."""

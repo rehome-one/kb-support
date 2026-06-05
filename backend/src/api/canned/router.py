@@ -7,6 +7,7 @@ RBAC (ADR-0009 Решение 4): **CRUD** (POST/PATCH) — скоуп `staff_su
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from typing import Any
 
@@ -15,17 +16,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal
+from api.canned.render import build_local_variables, render_template
 from api.canned.repository import CannedResponseRepository
 from api.canned.schemas import (
+    CannedRenderEnvelope,
+    CannedRenderInput,
+    CannedRenderResult,
     CannedResponseEnvelope,
     CannedResponseInput,
     CannedResponseListEnvelope,
     CannedResponseRead,
     CannedResponseUpdate,
 )
+from api.clients.platform import PlatformClient
 from api.db import get_session
 from api.errors import ProblemException
 from api.tickets.enums import TicketType
+from api.tickets.repository import TicketRepository
+from api.tickets.requester_context import get_platform_client
 
 router = APIRouter(prefix="/api/v1/support", tags=["Canned Responses"])
 
@@ -114,6 +122,48 @@ async def create_canned_response(
     await session.refresh(canned)
     return CannedResponseEnvelope(
         data=CannedResponseRead.model_validate(canned),
+        request_id=_resolve_request_id(x_request_id),
+    )
+
+
+@router.post(
+    "/canned-responses/{canned_id}/render",
+    response_model=CannedRenderEnvelope,
+    summary="Отрендерить шаблон для заявки",
+)
+async def render_canned_response(
+    canned_id: uuid.UUID,
+    payload: CannedRenderInput,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    platform: PlatformClient | None = Depends(get_platform_client),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> CannedRenderEnvelope:
+    """Подставить переменные шаблона по заявке. Рендер на сервере (ПДн не на фронт).
+
+    Доступно операторам. Локальные переменные — из заявки; `requester_name` — из platform
+    (#71), **config-gated**: при выключенной интеграции/недоступности токен
+    `{{requester_name}}` остаётся как есть (оператор заполнит вручную; ADR-0009 Реш.2)."""
+    _require_operator(principal)
+    canned = await CannedResponseRepository(session).get(canned_id)
+    if canned is None:
+        raise ProblemException.not_found(detail="Canned response not found")
+    ticket = await TicketRepository(session).get_for_principal(payload.ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+
+    variables = build_local_variables(ticket, today=datetime.datetime.now(datetime.UTC).date())
+    # requester_name — ПДн из platform (config-gated); недоступно → токен остаётся.
+    if platform is not None and ticket.requester_id is not None:
+        profile = await platform.get_user(ticket.requester_id)
+        if profile is not None and profile.display_name:
+            variables["requester_name"] = profile.display_name
+
+    return CannedRenderEnvelope(
+        data=CannedRenderResult(
+            rendered_body=render_template(canned.body, variables),
+            linked_article_slug=canned.linked_article_slug,
+        ),
         request_id=_resolve_request_id(x_request_id),
     )
 

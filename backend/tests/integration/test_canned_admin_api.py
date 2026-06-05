@@ -155,3 +155,63 @@ def test_invalid_type_rejected(client: TestClient) -> None:
         json={"title": "t", "body": "b", "type": "NOT_A_TYPE"},
     )
     assert resp.status_code == 422
+
+
+# --- render-эндпоинт (#127) ---
+
+
+def _create_ticket(client: TestClient) -> str:
+    resp = client.post("/api/v1/support/tickets", json={"subject": "тема", "type": "OTHER"})
+    assert resp.status_code == 201, resp.text
+    return str(resp.json()["data"]["id"])
+
+
+def test_render_substitutes_local_vars_and_leaves_unavailable(client: TestClient) -> None:
+    _use(_SUPPORT)
+    canned = client.post(
+        "/api/v1/support/canned-responses",
+        json={
+            "title": "t",
+            "body": "Здравствуйте, {{requester_name}}! Заявка {{ticket_number}}.",
+            "linked_article_slug": "help/x",
+        },
+    )
+    cid = canned.json()["data"]["id"]
+
+    _use(_OPERATOR)
+    ticket_id = _create_ticket(client)
+    rendered = client.post(
+        f"/api/v1/support/canned-responses/{cid}/render", json={"ticket_id": ticket_id}
+    )
+    assert rendered.status_code == 200, rendered.text
+    data = rendered.json()["data"]
+    # ticket_number подставлен; requester_name остаётся плейсхолдером (platform off в тесте).
+    assert "{{ticket_number}}" not in data["rendered_body"]
+    assert "{{requester_name}}" in data["rendered_body"]
+    assert data["linked_article_slug"] == "help/x"
+
+
+def test_render_not_found(client: TestClient) -> None:
+    _use(_OPERATOR)
+    ticket_id = _create_ticket(client)
+    # несуществующий шаблон → 404
+    assert (
+        client.post(
+            f"/api/v1/support/canned-responses/{uuid.uuid4()}/render",
+            json={"ticket_id": ticket_id},
+        ).status_code
+        == 404
+    )
+    # существующий шаблон, несуществующая заявка → 404
+    _use(_SUPPORT)
+    cid = client.post("/api/v1/support/canned-responses", json={"title": "t", "body": "b"}).json()[
+        "data"
+    ]["id"]
+    _use(_OPERATOR)
+    assert (
+        client.post(
+            f"/api/v1/support/canned-responses/{cid}/render",
+            json={"ticket_id": str(uuid.uuid4())},
+        ).status_code
+        == 404
+    )
