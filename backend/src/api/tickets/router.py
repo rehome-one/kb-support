@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal, PrincipalKind
+from api.canned.usage import record_canned_usage
 from api.clients.platform import PlatformClient
 from api.config import get_settings
 from api.db import get_session
@@ -390,6 +391,10 @@ async def create_message(
         TicketHistoryAction.MESSAGE_ADDED,
         to_value=message_added_payload(message),
     )
+    # E6-4 (#128): ответ из шаблона учитывается в usage_count (best-effort, SAVEPOINT —
+    # сбой/несуществующий шаблон не валит отправку; ADR-0009 Решение 5).
+    if payload.canned_response_id is not None:
+        await record_canned_usage(session, payload.canned_response_id)
     await session.commit()
     await session.refresh(message)
     # E3-4 (#72): публичный ответ оператора по AI_CHAT-заявке возвращается в
