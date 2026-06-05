@@ -5,7 +5,8 @@
 фиксируется здесь, чтобы сигнатуру хука не пришлось менять в E5.
 
 Дефолтный `on_sla_breach` — только структурный лог. Реальные действия эскалации
-(смена приоритета/команды, уведомление) — E5/#18 через AutomationRule.
+(смена приоритета/команды, уведомление) — через AutomationRule (#108,
+`api.automation.sla_breach`), которым actor подменяет дефолт.
 """
 
 from __future__ import annotations
@@ -46,10 +47,12 @@ def _legs(event: SlaBreachEvent) -> str:
 
 
 async def on_sla_breach(event: SlaBreachEvent) -> None:
-    """Дефолтный хук: структурный лог без ПДн.
+    """Дефолтный хук: структурный лог breach без ПДн (seam для инертного/тестового пути).
 
-    # TODO(E5/#18): реальная эскалация через AutomationRule (приоритет/команда/
-    # уведомление). В E4 это только seam — действий нет.
+    Боевая эскалация через AutomationRule (trigger=on_sla_breach) — выполнена в #108
+    (`api.automation.sla_breach.make_sla_breach_hook`), которым actor подменяет этот
+    дефолт. Здесь остаётся только структурный лог: его переиспользует и боевой мост
+    (наблюдаемость breach сохраняется).
     """
     _logger.warning(
         "sla_breach ticket_id=%s number=%s type=%s priority=%s team=%s legs=%s",

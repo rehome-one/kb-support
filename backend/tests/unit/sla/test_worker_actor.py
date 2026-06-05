@@ -24,11 +24,21 @@ class _FakeEngine:
 
 
 class _FakeSession:
+    def __init__(self) -> None:
+        self.committed = False
+
     async def __aenter__(self) -> _FakeSession:
         return self
 
     async def __aexit__(self, *exc: object) -> bool:
         return False
+
+    async def commit(self) -> None:
+        # С #108 actor коммитит проход (правила эскалации мутируют заявку).
+        self.committed = True
+
+    async def rollback(self) -> None:
+        return None
 
 
 async def test_scan_once_uses_own_nullpool_engine_and_disposes(
@@ -44,7 +54,9 @@ async def test_scan_once_uses_own_nullpool_engine_and_disposes(
 
     def fake_sessionmaker(bound: object, **_kw: object) -> Any:
         captured["bound"] = bound
-        return lambda: _FakeSession()
+        session = _FakeSession()
+        captured["session"] = session
+        return lambda: session
 
     async def fake_scan(session: object, **_kw: object) -> list[object]:
         return [object(), object()]
@@ -58,6 +70,7 @@ async def test_scan_once_uses_own_nullpool_engine_and_disposes(
     assert count == 2
     assert captured["poolclass"] is NullPool  # свой engine, NullPool
     assert captured["bound"] is engine  # фабрика привязана к собственному engine
+    assert captured["session"].committed is True  # #108: проход закоммичен
     assert engine.disposed is True  # engine диспознут в конце прохода
 
 
