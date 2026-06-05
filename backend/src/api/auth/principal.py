@@ -14,7 +14,7 @@ import enum
 import uuid
 from dataclasses import dataclass, field
 
-from api.auth.scopes import STAFF_ADMIN_SCOPE
+from api.auth.scopes import STAFF_ADMIN_SCOPE, STAFF_SUPPORT_SCOPE
 from api.tickets.enums import TicketTeam
 
 
@@ -56,3 +56,10 @@ class Principal:
         Гранулярное право из проверенного токена — не привязано к `kind` (оператор
         с этим скоупом администрирует конфигурацию; см. `auth/scopes.py`)."""
         return STAFF_ADMIN_SCOPE in self.scopes
+
+    @property
+    def is_staff_support(self) -> bool:
+        """Есть ли у субъекта скоуп управления шаблонами (CannedResponse CRUD, FR-5.1).
+
+        Гранулярное право из проверенного токена (ADR-0009); см. `auth/scopes.py`."""
+        return STAFF_SUPPORT_SCOPE in self.scopes
