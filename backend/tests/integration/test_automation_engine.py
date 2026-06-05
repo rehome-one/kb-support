@@ -173,7 +173,7 @@ def test_db_poisoning_action_isolated_by_savepoint(monkeypatch: pytest.MonkeyPat
         # Сессия НЕ отравлена: запрос после savepoint-восстановления выполняется.
         count = (await session.execute(select(func.count()).select_from(Ticket))).scalar()
         assert count is not None and count >= 1
-        # Заявка создана и согласована: requester_id восстановлен (expire после rollback).
+        # Заявка создана и согласована: requester_id восстановлен (refresh после rollback).
         assert ticket.requester_id is not None
 
     _autobegin(body)
