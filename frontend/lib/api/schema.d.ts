@@ -293,12 +293,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Список шаблонов ответов */
+        /**
+         * Список шаблонов ответов
+         * @description Доступно операторам (для вставки шаблона, FR-2.5). Bounded curated-набор — список целиком, без курсор-пагинации (как SLA/automation, ADR-0009).
+         */
         get: operations["listCannedResponses"];
         put?: never;
         /**
          * Создать шаблон
-         * @description scope=staff_support+
+         * @description scope=staff_support
          */
         post: operations["createCannedResponse"];
         delete?: never;
@@ -316,13 +319,20 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Шаблон ответа
+         * @description Доступно операторам.
+         */
+        get: operations["getCannedResponse"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        /** Изменить шаблон */
+        /**
+         * Изменить шаблон
+         * @description scope=staff_support
+         */
         patch: operations["updateCannedResponse"];
         trace?: never;
     };
@@ -908,12 +918,23 @@ export interface components {
             linked_article_slug?: string | null;
             /** @default 0 */
             usage_count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         CannedResponseInput: {
             title: string;
             body: string;
             type?: components["schemas"]["TicketType"];
             linked_article_slug?: string;
+        };
+        /** @description Частичное обновление шаблона (PATCH) — все поля опциональны. */
+        CannedResponseUpdate: {
+            title?: string;
+            body?: string;
+            type?: components["schemas"]["TicketType"] | null;
+            linked_article_slug?: string | null;
         };
         /** @description Условия применения SLA-политики (пустой объект = применима ко всем) */
         SLAAppliesTo: {
@@ -1871,9 +1892,6 @@ export interface operations {
         parameters: {
             query?: {
                 type?: components["schemas"]["TicketType"];
-                /** @description Курсор для пагинации (из предыдущего ответа) */
-                cursor?: components["parameters"]["Cursor"];
-                limit?: components["parameters"]["Limit"];
             };
             header?: never;
             path?: never;
@@ -1889,10 +1907,11 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ResponseEnvelope"] & {
                         data?: components["schemas"]["CannedResponse"][];
-                        pagination?: components["schemas"]["Pagination"];
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createCannedResponse: {
@@ -1922,8 +1941,36 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getCannedResponse: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["CannedResponse"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     updateCannedResponse: {
@@ -1940,7 +1987,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CannedResponseInput"];
+                "application/json": components["schemas"]["CannedResponseUpdate"];
             };
         };
         responses: {
@@ -1955,6 +2002,7 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };

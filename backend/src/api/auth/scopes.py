@@ -9,3 +9,7 @@ from __future__ import annotations
 
 STAFF_ADMIN_SCOPE = "staff_admin"
 """Скоуп администратора: настройка SLA-политик / business hours и пр. конфигурации (§6)."""
+
+STAFF_SUPPORT_SCOPE = "staff_support"
+"""Скоуп поддержки: управление шаблонами ответов (CannedResponse CRUD, FR-5.1, ADR-0009).
+Чтение/использование шаблонов (list/get/render) — любой оператор; CRUD — staff_support."""

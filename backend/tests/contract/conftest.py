@@ -32,7 +32,7 @@ from sqlalchemy.pool import NullPool
 
 from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal, PrincipalKind
-from api.auth.scopes import STAFF_ADMIN_SCOPE
+from api.auth.scopes import STAFF_ADMIN_SCOPE, STAFF_SUPPORT_SCOPE
 from api.config import get_settings
 from api.db import get_session
 from api.main import app
@@ -123,6 +123,19 @@ def admin_client() -> Iterator[TestClient]:
         teams=frozenset({TicketTeam.SUPPORT}),
     )
     with _testclient_with(admin) as client:
+        yield client
+
+
+@pytest.fixture
+def support_client() -> Iterator[TestClient]:
+    """TestClient с принципалом поддержки (оператор + `staff_support`) — CRUD шаблонов (#126)."""
+    support = Principal(
+        user_id=uuid.uuid4(),
+        kind=PrincipalKind.OPERATOR,
+        scopes=frozenset({STAFF_SUPPORT_SCOPE}),
+        teams=frozenset({TicketTeam.SUPPORT}),
+    )
+    with _testclient_with(support) as client:
         yield client
 
 

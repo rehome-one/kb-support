@@ -761,14 +761,15 @@ paths:
       tags:
       - Canned Responses
       summary: Список шаблонов ответов
+      description: >-
+        Доступно операторам (для вставки шаблона, FR-2.5). Bounded curated-набор —
+        список целиком, без курсор-пагинации (как SLA/automation, ADR-0009).
       operationId: listCannedResponses
       parameters:
       - name: type
         in: query
         schema:
           $ref: '#/components/schemas/TicketType'
-      - $ref: '#/components/parameters/Cursor'
-      - $ref: '#/components/parameters/Limit'
       responses:
         '200':
           description: OK
@@ -783,13 +784,15 @@ paths:
                       type: array
                       items:
                         $ref: '#/components/schemas/CannedResponse'
-                    pagination:
-                      $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags:
       - Canned Responses
       summary: Создать шаблон
-      description: scope=staff_support+
+      description: scope=staff_support
       operationId: createCannedResponse
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
@@ -811,6 +814,8 @@ paths:
                   properties:
                     data:
                       $ref: '#/components/schemas/CannedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '422':
@@ -823,19 +828,12 @@ paths:
       schema:
         type: string
         format: uuid
-    patch:
+    get:
       tags:
       - Canned Responses
-      summary: Изменить шаблон
-      operationId: updateCannedResponse
-      parameters:
-      - $ref: '#/components/parameters/CsrfToken'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CannedResponseInput'
+      summary: Шаблон ответа
+      description: Доступно операторам.
+      operationId: getCannedResponse
       responses:
         '200':
           description: OK
@@ -848,6 +846,40 @@ paths:
                   properties:
                     data:
                       $ref: '#/components/schemas/CannedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - Canned Responses
+      summary: Изменить шаблон
+      description: scope=staff_support
+      operationId: updateCannedResponse
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CannedResponseUpdate'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/CannedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -2139,6 +2171,9 @@ components:
       - id
       - title
       - body
+      - usage_count
+      - created_at
+      - updated_at
       properties:
         id:
           type: string
@@ -2160,20 +2195,52 @@ components:
         usage_count:
           type: integer
           default: 0
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     CannedResponseInput:
       type: object
+      additionalProperties: false
       required:
       - title
       - body
       properties:
         title:
           type: string
+          minLength: 1
+          maxLength: 200
         body:
           type: string
+          minLength: 1
         type:
           $ref: '#/components/schemas/TicketType'
         linked_article_slug:
           type: string
+          maxLength: 512
+    CannedResponseUpdate:
+      type: object
+      additionalProperties: false
+      description: Частичное обновление шаблона (PATCH) — все поля опциональны.
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        body:
+          type: string
+          minLength: 1
+        type:
+          oneOf:
+          - $ref: '#/components/schemas/TicketType'
+          - type: 'null'
+        linked_article_slug:
+          type:
+          - string
+          - 'null'
+          maxLength: 512
     SLAAppliesTo:
       type: object
       additionalProperties: false

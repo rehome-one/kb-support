@@ -385,6 +385,38 @@ def test_time_field_rejected_on_non_time_based_trigger(admin_client: TestClient)
     assert resp.status_code == 422, resp.text
 
 
+def test_canned_response_responses_conform(support_client: TestClient) -> None:
+    """AT-002 (#126): create/get/patch/list canned-responses соответствуют CannedResponse."""
+    create = support_client.post(
+        "/api/v1/support/canned-responses",
+        json={
+            "title": "contract template",
+            "body": "Привет, {{requester_name}}!",
+            "type": "PAYMENT",
+            "linked_article_slug": "help/x",
+        },
+    )
+    assert create.status_code == 201, create.text
+    assert_response_conforms("/api/v1/support/canned-responses", "post", "201", create.json())
+    cid = create.json()["data"]["id"]
+
+    got = support_client.get(f"/api/v1/support/canned-responses/{cid}")
+    assert got.status_code == 200
+    assert_response_conforms("/api/v1/support/canned-responses/{id}", "get", "200", got.json())
+
+    patched = support_client.patch(
+        f"/api/v1/support/canned-responses/{cid}", json={"title": "renamed"}
+    )
+    assert patched.status_code == 200
+    assert_response_conforms(
+        "/api/v1/support/canned-responses/{id}", "patch", "200", patched.json()
+    )
+
+    listed = support_client.get("/api/v1/support/canned-responses")
+    assert listed.status_code == 200
+    assert_response_conforms("/api/v1/support/canned-responses", "get", "200", listed.json())
+
+
 @requires_postgres
 def test_ticket_exposes_sla_state(operator_client: TestClient) -> None:
     """AT-002 (#89): ответ getTicket несёт sla_state из домена SlaState и конформен."""

@@ -15,6 +15,7 @@ from starlette.responses import JSONResponse, Response
 
 from api import __version__
 from api.automation.router import router as automation_router
+from api.canned.router import router as canned_router
 from api.config import get_settings
 from api.db import get_session
 from api.errors import ProblemException, problem_exception_handler
@@ -42,6 +43,7 @@ app.add_middleware(RequestIdMiddleware)
 app.include_router(tickets_router)
 app.include_router(sla_router)
 app.include_router(automation_router)
+app.include_router(canned_router)
 
 
 class HealthzResponse(BaseModel):
