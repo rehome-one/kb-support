@@ -266,6 +266,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/support/tickets/{id}/suggested-articles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Предложенные статьи базы знаний по заявке
+         * @description Предлагает статьи kb-wiki по содержанию заявки через поиск kb-search (FR-5.4). Только для операторов; заявителю — 403; чужая/несуществующая — 404. Read-only. `degraded=true` означает, что интеграция с kb-search не сконфигурирована (#77) или недоступна (AT-003) — список пуст, не ошибка.
+         */
+        get: operations["getSuggestedArticles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/support/tickets/from-chat": {
         parameters: {
             query?: never;
@@ -894,6 +916,16 @@ export interface components {
             premises: components["schemas"]["RequesterPremises"] | null;
             booking: components["schemas"]["RequesterBooking"] | null;
             collaborator: components["schemas"]["RequesterCollaborator"] | null;
+            degraded: boolean;
+        };
+        SuggestedArticle: {
+            slug: string;
+            title: string;
+            url?: string | null;
+        };
+        /** @description Предложенные статьи БЗ по заявке (FR-5.4). degraded=true — kb-search не сконфигурирован (#77) или недоступен (AT-003); список пуст, не ошибка. */
+        SuggestedArticlesResult: {
+            articles: components["schemas"]["SuggestedArticle"][];
             degraded: boolean;
         };
         TicketMessageCreate: {
@@ -1886,6 +1918,33 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getSuggestedArticles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["SuggestedArticlesResult"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };

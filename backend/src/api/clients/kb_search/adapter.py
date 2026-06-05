@@ -9,10 +9,12 @@ chat_session_id/message_id/исход (идентификаторы, не кон
 
 from __future__ import annotations
 
+from typing import Any
+
 from api.clients.auth import TokenProvider
 from api.clients.base import ResilientHttpClient
 from api.clients.errors import ExternalServiceError
-from api.clients.kb_search.models import OperatorReply, ReplyOutcome
+from api.clients.kb_search.models import ArticleSuggestion, OperatorReply, ReplyOutcome
 from api.observability.logging import get_logger
 
 _logger = get_logger("clients.kb_search")
@@ -73,3 +75,36 @@ class HttpKbSearchClient:
             return ReplyOutcome.DEGRADED
 
         return ReplyOutcome.DELIVERED
+
+    async def suggest_articles(self, query: str) -> list[ArticleSuggestion] | None:
+        """Поиск статей БЗ по тексту (FR-5.4, #130). provisional contract, see ADR-0009.
+
+        200 → список (возможно пустой); сетевой сбой/circuit-open/4xx-5xx/битый JSON →
+        `None` (деградация AT-003). В лог не попадает текст запроса (ФЗ-152 — может нести
+        фрагменты обращения), только operation/status."""
+        token = await self._token_provider.get_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            response = await self._http.request(
+                "POST",
+                "/api/v1/search",
+                operation="suggest_articles",
+                headers=headers,
+                json={"query": query},
+            )
+        except ExternalServiceError as exc:
+            _logger.warning("kb-search suggest degraded: %s", type(exc).__name__)
+            return None
+        if response.status_code >= 400:
+            _logger.warning("kb-search suggest degraded: status=%d", response.status_code)
+            return None
+        try:
+            payload = response.json()
+            results: list[dict[str, Any]] = payload["results"]
+            return [
+                ArticleSuggestion(slug=r["slug"], title=r["title"], url=r.get("url"))
+                for r in results
+            ]
+        except (ValueError, KeyError, TypeError):
+            _logger.warning("kb-search suggest degraded: malformed response")
+            return None

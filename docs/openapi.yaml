@@ -724,6 +724,42 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/support/tickets/{id}/suggested-articles:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Tickets
+      summary: Предложенные статьи базы знаний по заявке
+      description: >-
+        Предлагает статьи kb-wiki по содержанию заявки через поиск kb-search (FR-5.4).
+        Только для операторов; заявителю — 403; чужая/несуществующая — 404. Read-only.
+        `degraded=true` означает, что интеграция с kb-search не сконфигурирована (#77) или
+        недоступна (AT-003) — список пуст, не ошибка.
+      operationId: getSuggestedArticles
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SuggestedArticlesResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/support/tickets/from-chat:
     post:
       tags:
@@ -2148,6 +2184,35 @@ components:
           oneOf:
           - $ref: '#/components/schemas/RequesterCollaborator'
           - type: 'null'
+        degraded:
+          type: boolean
+    SuggestedArticle:
+      type: object
+      required:
+      - slug
+      - title
+      properties:
+        slug:
+          type: string
+        title:
+          type: string
+        url:
+          type:
+          - string
+          - 'null'
+    SuggestedArticlesResult:
+      type: object
+      description: >-
+        Предложенные статьи БЗ по заявке (FR-5.4). degraded=true — kb-search не
+        сконфигурирован (#77) или недоступен (AT-003); список пуст, не ошибка.
+      required:
+      - articles
+      - degraded
+      properties:
+        articles:
+          type: array
+          items:
+            $ref: '#/components/schemas/SuggestedArticle'
         degraded:
           type: boolean
     TicketMessageCreate:

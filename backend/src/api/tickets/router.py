@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal, PrincipalKind
 from api.canned.usage import record_canned_usage
+from api.clients.kb_search import KbSearchClient
 from api.clients.platform import PlatformClient
 from api.config import get_settings
 from api.db import get_session
@@ -72,6 +73,11 @@ from api.tickets.schemas import (
 )
 from api.tickets.sla_metrics import record_first_response
 from api.tickets.state_machine import is_allowed_transition
+from api.tickets.suggested_articles import (
+    SuggestedArticlesEnvelope,
+    get_kb_search_client,
+    suggest_for_ticket,
+)
 
 router = APIRouter(prefix="/api/v1/support/tickets", tags=["Tickets"])
 
@@ -328,6 +334,32 @@ async def get_requester_context(
         data=_requester_context_read(context),
         request_id=_resolve_request_id(x_request_id),
     )
+
+
+@router.get(
+    "/{ticket_id}/suggested-articles",
+    response_model=SuggestedArticlesEnvelope,
+    summary="Предложенные статьи базы знаний по заявке",
+)
+async def get_suggested_articles(
+    ticket_id: uuid.UUID,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    kb_search: KbSearchClient | None = Depends(get_kb_search_client),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> SuggestedArticlesEnvelope:
+    # Доступ как у requester-context: видимость заявки (404 anti-enum), затем operator-only
+    # (FR-5.4 — операторская функция). kb-search config-gated: выключено/недоступно →
+    # degraded=true, пустой список (не 5xx).
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    if not principal.is_operator:
+        raise ProblemException.forbidden(
+            detail="Suggested articles are available to operators only"
+        )
+    result = await suggest_for_ticket(ticket, kb_search)
+    return SuggestedArticlesEnvelope(data=result, request_id=_resolve_request_id(x_request_id))
 
 
 @router.get(
