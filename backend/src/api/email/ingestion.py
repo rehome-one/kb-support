@@ -55,7 +55,11 @@ async def ingest_email(
     platform_client: PlatformClient | None,
     kb_files_client: KbFilesClient | None,
 ) -> IngestResult:
-    """Принять разобранное письмо. Дедуп → привязка/создание. Не бросает на дубле."""
+    """Принять разобранное письмо. Дедуп → привязка/создание. Не бросает на дубле.
+
+    Дедуп — по `Message-ID`; письмо БЕЗ Message-ID (`message_id is None`) не дедупится
+    (best-effort) — повторная доставка такого письма может создать второй экземпляр
+    (редко: relay обычно проставляет Message-ID; частичный uniq — только для NOT NULL)."""
     repo = TicketRepository(session)
 
     # 1. Идемпотентность: уже принятое письмо (Message-ID) → no-op.
