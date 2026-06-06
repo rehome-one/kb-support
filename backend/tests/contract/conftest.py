@@ -114,6 +114,13 @@ def service_client() -> Iterator[TestClient]:
 
 
 @pytest.fixture
+def requester_client() -> Iterator[TestClient]:
+    """TestClient с заявителем (kind=REQUESTER) — для /from-web-form (E7-6, #148)."""
+    with _testclient_with(Principal(user_id=uuid.uuid4(), kind=PrincipalKind.REQUESTER)) as client:
+        yield client
+
+
+@pytest.fixture
 def admin_client() -> Iterator[TestClient]:
     """TestClient с админ-принципалом (оператор + `staff_admin`) — для SLA-конфигурации (#86)."""
     admin = Principal(

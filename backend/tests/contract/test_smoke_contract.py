@@ -20,7 +20,15 @@ def test_spec_loads_and_has_core_paths() -> None:
     assert "/api/v1/support/tickets" in SPEC["paths"]
     assert "/api/v1/support/tickets/{id}" in SPEC["paths"]
     assert "/api/v1/support/tickets/from-chat" in SPEC["paths"]
-    for schema in ("Ticket", "TicketSummary", "Pagination", "ResponseEnvelope", "TicketFromChat"):
+    assert "/api/v1/support/tickets/from-web-form" in SPEC["paths"]
+    for schema in (
+        "Ticket",
+        "TicketSummary",
+        "Pagination",
+        "ResponseEnvelope",
+        "TicketFromChat",
+        "WebFormTicketCreate",
+    ):
         assert schema in SPEC["components"]["schemas"]
 
 
@@ -37,6 +45,18 @@ def test_create_from_chat_response_conforms(service_client: TestClient) -> None:
     )
     assert resp.status_code == 201, resp.text
     assert_response_conforms("/api/v1/support/tickets/from-chat", "post", "201", resp.json())
+
+
+@requires_postgres
+def test_create_from_web_form_response_conforms(requester_client: TestClient) -> None:
+    """Drift-детектор: ответ POST /from-web-form (201) соответствует Ticket (E7-6, #148)."""
+    resp = requester_client.post(
+        "/api/v1/support/tickets/from-web-form",
+        json={"subject": "контракт веб-формы", "type": "PAYMENT"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["data"]["channel"] == "WEB_FORM"
+    assert_response_conforms("/api/v1/support/tickets/from-web-form", "post", "201", resp.json())
 
 
 @requires_postgres

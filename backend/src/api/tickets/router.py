@@ -70,6 +70,7 @@ from api.tickets.schemas import (
     TicketRead,
     TicketSummaryRead,
     TicketUpdate,
+    WebFormTicketCreate,
 )
 from api.tickets.sla_metrics import record_first_response
 from api.tickets.state_machine import is_allowed_transition
@@ -180,6 +181,58 @@ async def create_ticket_from_chat(
     if payload.transcript is not None and len(payload.transcript) > max_turns:
         raise ProblemException.unprocessable(detail=f"transcript exceeds {max_turns} turns")
     ticket, _created = await TicketRepository(session).create_from_chat(payload, principal)
+    await session.commit()
+    await session.refresh(ticket)
+    return _ticket_envelope(ticket, x_request_id)
+
+
+# Фиксированный body начального сообщения-носителя вложений веб-формы (решение
+# Архитектора #148: description НЕ дублируется — живёт только на Ticket.description).
+_WEB_FORM_ATTACHMENT_NOTE = "Вложения, приложенные при создании обращения через веб-форму"
+
+
+@router.post(
+    "/from-web-form",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TicketEnvelope,
+    summary="Создать заявку через веб-форму ЛК",
+)
+async def create_ticket_from_web_form(
+    payload: WebFormTicketCreate,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    # Self-service заявителя из ЛК (FR-1.3, ADR-0010 Решение 2). Только kind=REQUESTER:
+    # оператор создаёт через generic POST /tickets (от имени заявителя). requester_id и
+    # channel форсятся сервером (схема их не несёт) — anti-spoofing.
+    if principal.kind is not PrincipalKind.REQUESTER:
+        raise ProblemException.forbidden(
+            detail="Web form submission is a requester self-service action"
+        )
+    create = TicketCreate(
+        subject=payload.subject,
+        type=payload.type,
+        description=payload.description,
+        priority=payload.priority,
+        channel=TicketChannel.WEB_FORM,
+        requester_id=None,
+        premises_id=payload.premises_id,
+        booking_id=payload.booking_id,
+        tags=payload.tags,
+    )
+    repo = TicketRepository(session)
+    ticket = await repo.create(create, principal)
+    # Вложения живут на TicketMessage (у Ticket нет колонки attachments). Маркерное
+    # начальное сообщение создаётся ТОЛЬКО при непустых attachments (решение Архитектора).
+    if payload.attachments:
+        await TicketMessageRepository(session).create(
+            ticket.id,
+            principal,
+            body=_WEB_FORM_ATTACHMENT_NOTE,
+            is_internal=False,
+            attachments=payload.attachments,
+        )
     await session.commit()
     await session.refresh(ticket)
     return _ticket_envelope(ticket, x_request_id)
