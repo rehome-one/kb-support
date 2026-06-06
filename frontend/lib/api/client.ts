@@ -51,6 +51,9 @@ export type TicketResponse = OkJson<"getTicket", 200>;
 export type MessageListResponse = OkJson<"listMessages", 200>;
 export type TicketHistoryListResponse = OkJson<"getTicketHistory", 200>;
 export type RequesterContextResponse = OkJson<"getRequesterContext", 200>;
+export type SuggestedArticlesResponse = OkJson<"getSuggestedArticles", 200>;
+export type CannedListResponse = OkJson<"listCannedResponses", 200>;
+export type CannedRenderResponse = OkJson<"renderCannedResponse", 200>;
 export type MessageResponse = OkJson<"createMessage", 201>;
 export type ListTicketsQuery = NonNullable<operations["listTickets"]["parameters"]["query"]>;
 export type ListMessagesQuery = NonNullable<operations["listMessages"]["parameters"]["query"]>;
@@ -62,6 +65,7 @@ export type ResolveInput = BodyJson<"resolveTicket">;
 // closeTicket не принимает тело (см. контракт) — отдельного Input-типа нет.
 export type ReopenInput = BodyJson<"reopenTicket">;
 export type RateInput = BodyJson<"rateTicket">;
+export type CannedRenderInput = BodyJson<"renderCannedResponse">;
 
 // --- Ядро запроса ----------------------------------------------------------
 
@@ -188,6 +192,32 @@ export function getRequesterContext(
   deps?: ApiFetchDeps,
 ): Promise<RequesterContextResponse> {
   return request<RequesterContextResponse>(`${ticketPath(id)}/requester-context`, "GET", { deps });
+}
+
+export function getSuggestedArticles(
+  id: string,
+  deps?: ApiFetchDeps,
+): Promise<SuggestedArticlesResponse> {
+  return request<SuggestedArticlesResponse>(`${ticketPath(id)}/suggested-articles`, "GET", {
+    deps,
+  });
+}
+
+const CANNED = "/api/v1/support/canned-responses";
+
+export function listCannedResponses(deps?: ApiFetchDeps): Promise<CannedListResponse> {
+  return request<CannedListResponse>(CANNED, "GET", { deps });
+}
+
+export function renderCannedResponse(
+  id: string,
+  input: CannedRenderInput,
+  deps?: ApiFetchDeps,
+): Promise<CannedRenderResponse> {
+  return request<CannedRenderResponse>(`${CANNED}/${encodeURIComponent(id)}/render`, "POST", {
+    body: input,
+    deps,
+  });
 }
 
 export function createMessage(

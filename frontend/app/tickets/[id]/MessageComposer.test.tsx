@@ -2,12 +2,30 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageComposer } from "./MessageComposer";
-import type { ActionResult } from "./types";
+import type { ActionResult, CannedSummary, RenderResult } from "./types";
 
 const okAction = () => vi.fn().mockResolvedValue({ ok: true } satisfies ActionResult);
+const noTemplates: CannedSummary[] = [];
+const noRender = () =>
+  vi.fn<(t: string, c: string) => Promise<RenderResult>>().mockResolvedValue({
+    ok: true,
+    body: "",
+    linkedArticleSlug: null,
+  });
 
-function renderComposer(action = okAction()) {
-  render(<MessageComposer ticketId="t1" createMessageAction={action} />);
+function renderComposer(
+  action = okAction(),
+  templates: CannedSummary[] = noTemplates,
+  renderTemplateAction = noRender(),
+) {
+  render(
+    <MessageComposer
+      ticketId="t1"
+      createMessageAction={action}
+      templates={templates}
+      renderTemplateAction={renderTemplateAction}
+    />,
+  );
   return action;
 }
 
@@ -60,6 +78,67 @@ describe("MessageComposer — отправка", () => {
     typeBody("текст");
     fireEvent.click(screen.getByRole("button", { name: "Отправить ответ" }));
     await waitFor(() => expect(screen.getByLabelText("Текст сообщения")).toHaveValue(""));
+  });
+});
+
+describe("MessageComposer — шаблоны (#131)", () => {
+  const templates: CannedSummary[] = [
+    { id: "c1", title: "Возврат", body: "", type: null, usage_count: 0 } as CannedSummary,
+  ];
+
+  it("выбор шаблона рендерит его и вставляет текст; отправка несёт canned_response_id", async () => {
+    const createAction = okAction();
+    const renderAction = vi
+      .fn<(t: string, c: string) => Promise<RenderResult>>()
+      .mockResolvedValue({ ok: true, body: "Здравствуйте, Иван!", linkedArticleSlug: null });
+    render(
+      <MessageComposer
+        ticketId="t1"
+        createMessageAction={createAction}
+        templates={templates}
+        renderTemplateAction={renderAction}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Вставить шаблон ответа"), {
+      target: { value: "c1" },
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Текст сообщения")).toHaveValue("Здравствуйте, Иван!"),
+    );
+    expect(renderAction).toHaveBeenCalledWith("t1", "c1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Отправить ответ" }));
+    await waitFor(() =>
+      expect(createAction).toHaveBeenCalledWith("t1", {
+        body: "Здравствуйте, Иван!",
+        is_internal: false,
+        canned_response_id: "c1",
+      }),
+    );
+  });
+
+  it("без шаблонов селектор не показывается", () => {
+    renderComposer();
+    expect(screen.queryByLabelText("Вставить шаблон ответа")).not.toBeInTheDocument();
+  });
+
+  it("ошибка рендера шаблона → inline-алерт", async () => {
+    const renderAction = vi
+      .fn<(t: string, c: string) => Promise<RenderResult>>()
+      .mockResolvedValue({ ok: false, status: 404, title: "Шаблон не найден" });
+    render(
+      <MessageComposer
+        ticketId="t1"
+        createMessageAction={okAction()}
+        templates={templates}
+        renderTemplateAction={renderAction}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Вставить шаблон ответа"), {
+      target: { value: "c1" },
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Шаблон не найден");
   });
 });
 

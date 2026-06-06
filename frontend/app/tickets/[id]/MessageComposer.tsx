@@ -4,18 +4,42 @@ import { useState } from "react";
 
 import type { MessageCreateInput } from "@/lib/api/client";
 
-import type { ActionResult } from "./types";
+import type { ActionResult, CannedSummary, RenderResult } from "./types";
 
 interface Props {
   ticketId: string;
   createMessageAction: (id: string, input: MessageCreateInput) => Promise<ActionResult>;
+  templates: CannedSummary[];
+  renderTemplateAction: (ticketId: string, cannedId: string) => Promise<RenderResult>;
 }
 
-export function MessageComposer({ ticketId, createMessageAction }: Props) {
+export function MessageComposer({
+  ticketId,
+  createMessageAction,
+  templates,
+  renderTemplateAction,
+}: Props) {
   const [body, setBody] = useState("");
   const [isInternal, setIsInternal] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<{ status: number; title: string } | null>(null);
+  // Шаблон-источник вставленного текста — для учёта usage_count (#128). Сбрасывается
+  // после отправки; ручная правка текста его НЕ сбрасывает (шаблон всё равно использован).
+  const [cannedId, setCannedId] = useState<string | null>(null);
+
+  async function insertTemplate(id: string) {
+    if (!id || pending) return;
+    setPending(true);
+    setError(null);
+    const result = await renderTemplateAction(ticketId, id);
+    setPending(false);
+    if (result.ok) {
+      setBody(result.body);
+      setCannedId(id);
+    } else {
+      setError({ status: result.status, title: result.title });
+    }
+  }
 
   async function submit() {
     const text = body.trim();
@@ -23,12 +47,18 @@ export function MessageComposer({ ticketId, createMessageAction }: Props) {
     setPending(true);
     setError(null);
     // is_internal лишь передаётся флагом — видимость/RBAC (403 не-оператору) решает бэкенд (NFR-1.3).
-    const result = await createMessageAction(ticketId, { body: text, is_internal: isInternal });
+    // canned_response_id — для usage_count (#128); бэкенд best-effort, отсутствие не валит отправку.
+    const result = await createMessageAction(ticketId, {
+      body: text,
+      is_internal: isInternal,
+      ...(cannedId ? { canned_response_id: cannedId } : {}),
+    });
     setPending(false);
     if (result.ok) {
       // Очистка строго по успеху (revalidatePath обновит переписку).
       setBody("");
       setIsInternal(false);
+      setCannedId(null);
     } else {
       setError({ status: result.status, title: result.title });
     }
@@ -50,6 +80,26 @@ export function MessageComposer({ ticketId, createMessageAction }: Props) {
         >
           {error.title}
         </div>
+      )}
+
+      {templates.length > 0 && (
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-gray-600">Шаблон:</span>
+          <select
+            className="rounded border border-gray-300 px-2 py-1 text-sm disabled:opacity-50"
+            aria-label="Вставить шаблон ответа"
+            disabled={pending}
+            value=""
+            onChange={(e) => insertTemplate(e.target.value)}
+          >
+            <option value="">— выбрать —</option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title}
+              </option>
+            ))}
+          </select>
+        </label>
       )}
 
       <textarea
