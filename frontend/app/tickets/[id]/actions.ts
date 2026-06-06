@@ -8,6 +8,7 @@ import {
   closeTicket,
   createMessage,
   escalateTicket,
+  renderCannedResponse,
   reopenTicket,
   resolveTicket,
   updateTicket,
@@ -20,7 +21,7 @@ import {
 } from "@/lib/api/client";
 import { UnauthenticatedError } from "@/lib/api/transport";
 
-import type { ActionResult } from "./types";
+import type { ActionResult, RenderResult } from "./types";
 
 // Общая обёртка: выполнить мутацию серверно (Bearer из сессии — токен не уходит в
 // браузер), при успехе ревалидировать карточку, ошибку отдать как {status,title}.
@@ -76,4 +77,33 @@ export async function createMessageAction(
   input: MessageCreateInput,
 ): Promise<ActionResult> {
   return run(id, () => createMessage(id, input));
+}
+
+// Рендер шаблона для заявки (#131): подстановка переменных на сервере (ПДн — на сервере),
+// результат (готовый текст + slug статьи) возвращается оператору для вставки в композер.
+// Ошибка пересекает границу только как {status,title} (detail/problem остаётся на сервере).
+export async function renderCannedAction(
+  ticketId: string,
+  cannedId: string,
+): Promise<RenderResult> {
+  try {
+    const res = await renderCannedResponse(cannedId, { ticket_id: ticketId });
+    const data = res.data;
+    if (!data) {
+      return { ok: false, status: 0, title: "Не удалось отрендерить шаблон" };
+    }
+    return {
+      ok: true,
+      body: data.rendered_body,
+      linkedArticleSlug: data.linked_article_slug ?? null,
+    };
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) {
+      return { ok: false, status: 401, title: "Сессия истекла — войдите снова" };
+    }
+    if (error instanceof ApiError) {
+      return { ok: false, status: error.status, title: error.title };
+    }
+    return { ok: false, status: 0, title: "Не удалось отрендерить шаблон" };
+  }
 }

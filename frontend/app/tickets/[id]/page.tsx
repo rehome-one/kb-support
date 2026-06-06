@@ -5,8 +5,10 @@ import { OperatorHeader } from "@/app/components/OperatorHeader";
 import {
   ApiError,
   getRequesterContext,
+  getSuggestedArticles,
   getTicket,
   getTicketHistory,
+  listCannedResponses,
   listMessages,
 } from "@/lib/api/client";
 
@@ -16,6 +18,7 @@ import {
   createMessageAction,
   escalateAction,
   patchTicketAction,
+  renderCannedAction,
   reopenAction,
   resolveAction,
 } from "./actions";
@@ -23,9 +26,16 @@ import { HistoryTimeline } from "./HistoryTimeline";
 import { MessageComposer } from "./MessageComposer";
 import { MessageThread } from "./MessageThread";
 import { RequesterContext } from "./RequesterContext";
+import { SuggestedArticles } from "./SuggestedArticles";
 import { TicketActions } from "./TicketActions";
 import { TicketDetail } from "./TicketDetail";
-import type { RequesterContextResult, TicketHistoryEntry, TicketMessage } from "./types";
+import type {
+  CannedSummary,
+  RequesterContextResult,
+  SuggestedArticlesResult,
+  TicketHistoryEntry,
+  TicketMessage,
+} from "./types";
 
 type MessagesResult = { items: TicketMessage[] } | { error: string };
 type HistoryResult = { items: TicketHistoryEntry[] } | { forbidden: true } | { error: string };
@@ -64,6 +74,29 @@ async function loadRequesterContext(id: string): Promise<RequesterContextResult>
       return { forbidden: true };
     }
     return { error: "Не удалось загрузить контекст заявителя" };
+  }
+}
+
+// Шаблоны ответов для панели композера (#131). Ошибка не критична — панель просто
+// не показывается (пустой список). Токен остаётся на сервере (server-only клиент).
+async function loadTemplates(): Promise<CannedSummary[]> {
+  try {
+    const res = await listCannedResponses();
+    return res.data ?? [];
+  } catch {
+    return [];
+  }
+}
+
+// Предложенные статьи БЗ (#131, FR-5.4). 200 несёт degraded-флаг; сбой → мягкая ошибка.
+async function loadSuggestedArticles(id: string): Promise<SuggestedArticlesResult> {
+  try {
+    const res = await getSuggestedArticles(id);
+    return res.data
+      ? { articles: res.data.articles, degraded: res.data.degraded }
+      : { error: "Похожие статьи недоступны" };
+  } catch {
+    return { error: "Не удалось загрузить похожие статьи" };
   }
 }
 
@@ -106,10 +139,12 @@ export default async function TicketCardPage({ params }: { params: { id: string 
   }
   if (!ticket) notFound();
 
-  const [messages, history, requesterContext] = await Promise.all([
+  const [messages, history, requesterContext, templates, suggestedArticles] = await Promise.all([
     loadMessages(id),
     loadHistory(id),
     loadRequesterContext(id),
+    loadTemplates(),
+    loadSuggestedArticles(id),
   ]);
 
   return (
@@ -139,7 +174,16 @@ export default async function TicketCardPage({ params }: { params: { id: string 
         ) : (
           <MessageThread messages={messages.items} />
         )}
-        <MessageComposer ticketId={ticket.id} createMessageAction={createMessageAction} />
+        <MessageComposer
+          ticketId={ticket.id}
+          createMessageAction={createMessageAction}
+          templates={templates}
+          renderTemplateAction={renderCannedAction}
+        />
+      </Section>
+
+      <Section title="Похожие статьи">
+        <SuggestedArticles result={suggestedArticles} />
       </Section>
 
       <Section title="История">
