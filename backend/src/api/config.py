@@ -154,6 +154,22 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- kb-files (E7-1, #143, ADR-0010 Решение 4). Загрузка вложений email/веб-формы
+    # в MinIO по API (НЕ shared bucket). Провизорный контракт. ПУСТОЙ kb_files_api_token =
+    # интеграция выключена (фабрика потребителя #145 вернёт None; upload не зовётся;
+    # инертно до #77). ---
+    kb_files_api_base_url: str = Field(
+        default="http://localhost:8084",
+        description="Базовый URL kb-files API (загрузка вложений заявок в MinIO).",
+    )
+    kb_files_api_token: str = Field(
+        default="",
+        description=(
+            "m2m-токен для StaticTokenProvider (dev/test). ПУСТО → kb-files выключен "
+            "(вложения не загружаются). Реальный ClientCredentials — #77."
+        ),
+    )
+
     # --- SLA-воркер (E4-6, #90, ADR-0007 Решение 1). Dramatiq-actor проактивно
     # сканирует БД по дедлайнам и дёргает breach-хук (seam под эскалацию E5/#18).
     # ПУСТОЙ sla_worker_broker_url = выключено (StubBroker, actor инертен) — тот же
