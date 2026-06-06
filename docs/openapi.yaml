@@ -792,6 +792,44 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/tickets/from-web-form:
+    post:
+      tags:
+      - Tickets
+      summary: Создать заявку через веб-форму ЛК
+      description: >-
+        Создание заявки заявителем через веб-форму в личном кабинете rehome.one
+        (FR-1.3, ADR-0010 Решение 2). Только аутентифицированный заявитель
+        (kind=REQUESTER); requester_id и channel=WEB_FORM форсятся сервером
+        (в теле не принимаются — anti-spoofing). При непустых attachments создаётся
+        начальное сообщение-носитель вложений. UI веб-формы — в ЛК (вне kb-support).
+      operationId: createTicketFromWebForm
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebFormTicketCreate'
+      responses:
+        '201':
+          description: Заявка создана
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/support/canned-responses:
     get:
       tags:
@@ -1932,6 +1970,39 @@ components:
         custom_fields:
           type: object
           additionalProperties: true
+    WebFormTicketCreate:
+      type: object
+      additionalProperties: false
+      required:
+      - subject
+      - type
+      properties:
+        subject:
+          type: string
+          minLength: 1
+          maxLength: 300
+        type:
+          $ref: '#/components/schemas/TicketType'
+        description:
+          type: string
+        priority:
+          $ref: '#/components/schemas/TicketPriority'
+        premises_id:
+          type: string
+          format: uuid
+        booking_id:
+          type: string
+          format: uuid
+        tags:
+          type: array
+          items:
+            type: string
+        attachments:
+          type: array
+          description: file_id вложений, загруженных ЛК в kb-files
+          items:
+            type: string
+            format: uuid
     TicketUpdate:
       type: object
       description: Частичное обновление. Недопустимые переходы статуса → 422

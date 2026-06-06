@@ -52,6 +52,25 @@ class TicketCreate(BaseModel):
     custom_fields: dict[str, Any] | None = None
 
 
+class WebFormTicketCreate(BaseModel):
+    """Тело POST /tickets/from-web-form (E7-6, #148). Веб-форма в ЛК rehome.one.
+
+    `channel` и `requester_id` НЕ принимаются от клиента (форсятся сервером:
+    channel=WEB_FORM, requester_id из проверенного принципала — anti-spoofing,
+    ADR-0010 Решение 2). `attachments` — file_id, загруженные ЛК в kb-files."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    subject: str = Field(min_length=1, max_length=300)
+    type: TicketType
+    description: str | None = None
+    priority: TicketPriority | None = None
+    premises_id: uuid.UUID | None = None
+    booking_id: uuid.UUID | None = None
+    tags: list[str] | None = None
+    attachments: list[uuid.UUID] | None = None
+
+
 class TranscriptTurn(BaseModel):
     """Реплика диалога AI-чата (контракт `TicketFromChat.transcript[]`)."""
 

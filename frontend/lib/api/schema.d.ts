@@ -308,6 +308,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/support/tickets/from-web-form": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Создать заявку через веб-форму ЛК
+         * @description Создание заявки заявителем через веб-форму в личном кабинете rehome.one (FR-1.3, ADR-0010 Решение 2). Только аутентифицированный заявитель (kind=REQUESTER); requester_id и channel=WEB_FORM форсятся сервером (в теле не принимаются — anti-spoofing). При непустых attachments создаётся начальное сообщение-носитель вложений. UI веб-формы — в ЛК (вне kb-support).
+         */
+        post: operations["createTicketFromWebForm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/support/canned-responses": {
         parameters: {
             query?: never;
@@ -801,6 +821,19 @@ export interface components {
             custom_fields?: {
                 [key: string]: unknown;
             };
+        };
+        WebFormTicketCreate: {
+            subject: string;
+            type: components["schemas"]["TicketType"];
+            description?: string;
+            priority?: components["schemas"]["TicketPriority"];
+            /** Format: uuid */
+            premises_id?: string;
+            /** Format: uuid */
+            booking_id?: string;
+            tags?: string[];
+            /** @description file_id вложений, загруженных ЛК в kb-files */
+            attachments?: string[];
         };
         /** @description Частичное обновление. Недопустимые переходы статуса → 422 */
         TicketUpdate: {
@@ -1979,6 +2012,38 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    createTicketFromWebForm: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Идентификатор запроса для трассировки */
+                "X-Request-Id"?: components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebFormTicketCreate"];
+            };
+        };
+        responses: {
+            /** @description Заявка создана */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["Ticket"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };
