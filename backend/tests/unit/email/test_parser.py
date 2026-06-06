@@ -118,6 +118,15 @@ def test_html_only_fallback_strips_script_and_unescapes() -> None:
     assert "строка2" in parsed.text_body
 
 
+def test_html_unclosed_script_stripped() -> None:
+    # Обрезанный <script> без закрывающего тега → тело JS не утекает в text_body.
+    m = _msg()
+    m.set_content("<html><body>before<script>evilCode()", subtype="html")
+    parsed = parse_email(m.as_bytes())
+    assert "evilCode" not in parsed.text_body
+    assert "before" in parsed.text_body
+
+
 def test_multipart_prefers_plain_and_parses_thread_headers() -> None:
     m = _msg()
     m["In-Reply-To"] = "<parent@mail>"

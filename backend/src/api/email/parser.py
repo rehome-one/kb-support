@@ -27,7 +27,9 @@ from email.utils import parseaddr
 _TICKET_NUMBER_RE = re.compile(r"\bRH-\d{4}-\d{5,}\b", re.IGNORECASE)
 
 # HTML-fallback (lossy): сперва вырезаем script/style целиком, затем теги.
-_SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
+# `(?:</\1>|$)` — при незакрытом/обрезанном теге вырезаем до конца строки (иначе
+# тело script/style утекло бы в text_body как текст-шум).
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?(?:</\1>|$)", re.IGNORECASE | re.DOTALL)
 _BLOCK_BREAK_RE = re.compile(r"(?i)<br\s*/?>|</(p|div|tr|h[1-6]|li)>")
 _TAG_RE = re.compile(r"<[^>]+>")
 
