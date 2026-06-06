@@ -15,8 +15,16 @@ from api.auth.principal import Principal
 from api.automation.enums import AutomationTrigger
 from api.sla.assignment import apply_sla
 from api.tickets.access import visibility_filter
-from api.tickets.enums import AccessLevel, TicketChannel, TicketPriority, TicketStatus, TicketType
+from api.tickets.enums import (
+    AccessLevel,
+    AuthorType,
+    TicketChannel,
+    TicketPriority,
+    TicketStatus,
+    TicketType,
+)
 from api.tickets.history import TicketHistoryAction, TicketHistoryRepository, record_changes
+from api.tickets.messages import TicketMessage
 from api.tickets.models import Ticket
 from api.tickets.numbering import generate_ticket_number
 from api.tickets.pagination import (
@@ -175,6 +183,24 @@ class TicketRepository:
         )
         return (await self._session.execute(stmt)).scalars().first()
 
+    async def find_active_by_number(self, number: str) -> Ticket | None:
+        """Активная (не CLOSED) заявка по человекочитаемому номеру, в обход
+        visibility-filter (E7-3, #145). Приём email — m2m/worker-контекст (как дедуп
+        чата): visibility_filter здесь НЕ применяется. `number` уникален → детерминирован.
+        CLOSED не считается — ответ на закрытую заявку создаёт новую (ADR-0010 Реш.3).
+        """
+        stmt = select(Ticket).where(
+            Ticket.number == number,
+            Ticket.status != TicketStatus.CLOSED.value,
+        )
+        return (await self._session.execute(stmt)).scalars().first()
+
+    async def find_message_by_email_id(self, email_message_id: str) -> TicketMessage | None:
+        """Сообщение по Message-ID входящего письма (E7-3, #145) — дедуп идемпотентного
+        приёма и recovery после гонки на частичном uniq. Без visibility-filter (m2m)."""
+        stmt = select(TicketMessage).where(TicketMessage.email_message_id == email_message_id)
+        return (await self._session.execute(stmt)).scalars().first()
+
     async def create_from_chat(
         self, payload: TicketFromChat, principal: Principal
     ) -> tuple[Ticket, bool]:
@@ -232,6 +258,66 @@ class TicketRepository:
         # (идемпотентный возврат existing выше правил не запускает).
         await self._run_automation(ticket, AutomationTrigger.ON_CREATE.value)
         return ticket, True
+
+    async def create_from_email(
+        self, *, subject: str, requester_id: uuid.UUID, custom_fields: dict[str, Any]
+    ) -> Ticket:
+        """Создать заявку из входящего письма (E7-3, #145). channel=EMAIL,
+        `description=""` — тело письма живёт в первом TicketMessage (решение Архитектора:
+        email-native, без дублирования ПДн). `requester_id` — резолв/sentinel (ingestion,
+        sender не доверяем). actor журнала — requester_id. Хвост (flush/SLA/history/
+        automation) зеркалит create_from_chat."""
+        ticket = Ticket(
+            number=await generate_ticket_number(self._session),
+            subject=subject,
+            description="",
+            type=TicketType.OTHER.value,
+            status=TicketStatus.NEW.value,
+            priority=TicketPriority.NORMAL.value,
+            channel=TicketChannel.EMAIL.value,
+            access_level=AccessLevel.LOGGED.value,
+            requester_id=requester_id,
+            tags=[],
+            custom_fields=custom_fields,
+        )
+        self._session.add(ticket)
+        await self._session.flush()
+        await apply_sla(self._session, ticket)
+        await self._history.record(
+            ticket.id,
+            requester_id,
+            TicketHistoryAction.CREATED,
+            to_value={"status": ticket.status},
+        )
+        await self._run_automation(ticket, AutomationTrigger.ON_CREATE.value)
+        return ticket
+
+    async def add_email_message(
+        self,
+        ticket_id: uuid.UUID,
+        *,
+        author_id: uuid.UUID,
+        body: str,
+        attachments: list[str],
+        email_message_id: str | None,
+    ) -> TicketMessage:
+        """Добавить входящее письмо как сообщение (E7-3, #145). НЕ `messages.create`:
+        автор — из резолва/sentinel (sender не доверяем), не из принципала; несёт
+        `email_message_id` (дедуп). `is_internal=False` всегда — входящее письмо не
+        может стать внутренней заметкой (NFR-1.3). flush может бросить IntegrityError
+        на частичном uniq (дедуп) — обрабатывает вызывающий (ingestion)."""
+        message = TicketMessage(
+            ticket_id=ticket_id,
+            author_id=author_id,
+            author_type=AuthorType.REQUESTER.value,
+            body=body,
+            is_internal=False,
+            attachments=attachments,
+            email_message_id=email_message_id,
+        )
+        self._session.add(message)
+        await self._session.flush()
+        return message
 
     async def get_for_principal(self, ticket_id: uuid.UUID, principal: Principal) -> Ticket | None:
         """Вернуть заявку, если она видима субъекту, иначе None (→ 404)."""

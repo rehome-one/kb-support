@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, Uuid, func, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, Uuid, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,7 +27,18 @@ class TicketMessage(Base):
     """Сообщение в переписке заявки (ТЗ §3.5)."""
 
     __tablename__ = "ticket_messages"
-    __table_args__ = (Index("ix_ticket_messages_ticket_id_created_at", "ticket_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_ticket_messages_ticket_id_created_at", "ticket_id", "created_at"),
+        # Частичный uniq: идемпотентность приёма входящего email по Message-ID (E7-3,
+        # #145). Только для строк с email_message_id IS NOT NULL (прочие сообщения не
+        # затрагиваются). Дедуп повторно доставленных писем — на уровне сообщения.
+        Index(
+            "uq_ticket_messages_email_message_id",
+            "email_message_id",
+            unique=True,
+            postgresql_where=text("email_message_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(), primary_key=True, default=uuid.uuid4)
     ticket_id: Mapped[uuid.UUID] = mapped_column(
@@ -44,6 +55,9 @@ class TicketMessage(Base):
     attachments: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"
     )
+    # Message-ID входящего email (E7-3, #145) — идемпотентность приёма (частичный
+    # uniq выше). NULL для не-email сообщений.
+    email_message_id: Mapped[str | None] = mapped_column(String(998), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
