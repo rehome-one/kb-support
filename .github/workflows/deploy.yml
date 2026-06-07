@@ -123,8 +123,8 @@ jobs:
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
           REGISTRY_URL: ${{ secrets.SELECTEL_CR_URL }}
         with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
+          host: ${{ secrets.HOST || vars.HOST || '95.213.154.92' }}
+          username: ${{ secrets.USERNAME || vars.USERNAME || 'root' }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: CR_TOKEN,CR_TOKEN_USER,IMAGE_TAG,REGISTRY_URL
           script: |
@@ -205,8 +205,8 @@ jobs:
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
           REGISTRY_URL: ${{ secrets.SELECTEL_CR_URL }}
         with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
+          host: ${{ secrets.HOST || vars.HOST || '95.213.154.92' }}
+          username: ${{ secrets.USERNAME || vars.USERNAME || 'root' }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: CR_TOKEN,CR_TOKEN_USER,IMAGE_TAG,REGISTRY_URL
           script: |
