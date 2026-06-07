@@ -9,6 +9,8 @@ export const APP_PORT = 3100;
 export const FIXTURE_PORT = 3101;
 
 export const APP_URL = `http://localhost:${APP_PORT}`;
+export const APP_BASE_PATH = "/support";
+export const APP_READY_URL = `${APP_URL}${APP_BASE_PATH}/login`;
 export const FIXTURE_URL = `http://localhost:${FIXTURE_PORT}`;
 
 /**

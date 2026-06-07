@@ -12,6 +12,7 @@ import { defineConfig, devices } from "@playwright/test";
 import {
   APP_PORT,
   APP_URL,
+  APP_READY_URL,
   AUTH_SECRET,
   FIXTURE_PORT,
   FIXTURE_URL,
@@ -63,7 +64,7 @@ export default defineConfig({
     {
       command: `next start -p ${APP_PORT}`,
       env: appEnv,
-      url: APP_URL,
+      url: APP_READY_URL,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

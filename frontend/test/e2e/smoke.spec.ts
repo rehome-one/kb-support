@@ -13,7 +13,7 @@ import { TICKET_NUMBER, TICKET_SUBJECT } from "./fixtures.data.mjs";
 
 test("оператор: список → карточка → ответ", async ({ page }) => {
   // 1. Список заявок: маршрут защищён middleware, проходим благодаря storageState.
-  await page.goto("/tickets");
+  await page.goto("/support/tickets");
   await expect(page.getByRole("heading", { name: "Заявки" })).toBeVisible();
 
   const ticketLink = page.getByRole("link", { name: TICKET_NUMBER });
@@ -21,7 +21,7 @@ test("оператор: список → карточка → ответ", async
 
   // 2. Открыть карточку.
   await ticketLink.click();
-  await expect(page).toHaveURL(/\/tickets\/[0-9a-f-]+$/);
+  await expect(page).toHaveURL(/\/support\/tickets\/[0-9a-f-]+$/);
   await expect(page.getByRole("heading", { name: TICKET_SUBJECT })).toBeVisible();
 
   // Исходная переписка заявителя видна.
