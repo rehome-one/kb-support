@@ -118,6 +118,22 @@ class HttpPlatformClient:
             f"/api/v1/users/{user_id}", "get_user", f"platform:user:{user_id}", _map_user
         )
 
+    async def get_user_by_email(self, email: str) -> UserProfile | None:
+        """Резолв заявителя по email входящего письма (E7-3, #145). НЕ кешируется:
+        email — ПДн, не кладём в Redis-ключ (ФЗ-152). provisional contract, see ADR-0006."""
+        # provisional contract: lookup пользователя по email (форма uri упростится
+        # с боевым platform API; адаптер — единственное место знания контракта).
+        data = await self._fetch_uncached(
+            "/api/v1/users", "get_user_by_email", params={"email": email}
+        )
+        if data is None:
+            return None
+        try:
+            return _map_user(data)
+        except (KeyError, TypeError, ValueError):
+            _logger.warning("platform get_user_by_email degraded: mapping failed")
+            return None
+
     async def get_premises(self, premises_id: uuid.UUID) -> Premises | None:
         return await self._get(
             f"/api/v1/premises/{premises_id}",
@@ -185,4 +201,30 @@ class HttpPlatformClient:
             return None
 
         await self._cache.set(cache_key, json.dumps(payload), self._ttl)
+        return payload
+
+    async def _fetch_uncached(
+        self, path: str, operation: str, *, params: dict[str, str] | None = None
+    ) -> dict[str, Any] | None:
+        """GET без кеша (для резолва по email — ПДн в ключе недопустимы, ФЗ-152).
+        Деградация как в `_fetch`: недоступность/4xx/битый JSON → None + WARN."""
+        token = await self._token_provider.get_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            response = await self._http.request(
+                "GET", path, operation=operation, headers=headers, params=params
+            )
+        except ExternalServiceError as exc:
+            _logger.warning("platform %s degraded: %s", operation, type(exc).__name__)
+            return None
+
+        if response.status_code >= 400:
+            _logger.warning("platform %s degraded: status=%d", operation, response.status_code)
+            return None
+
+        try:
+            payload: dict[str, Any] = response.json()
+        except (ValueError, json.JSONDecodeError):
+            _logger.warning("platform %s degraded: malformed JSON", operation)
+            return None
         return payload

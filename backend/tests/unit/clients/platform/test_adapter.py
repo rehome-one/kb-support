@@ -339,3 +339,54 @@ async def test_pii_not_logged_on_degradation() -> None:
     assert "secret@pii.ru" not in logged
     assert "+79991234567" not in logged
     assert "Секретное Имя" not in logged
+
+
+# --- get_user_by_email (E7-3, #145): резолв заявителя по email, БЕЗ кеша (ПДн) ---
+
+
+async def test_get_user_by_email_maps() -> None:
+    body = {
+        "id": str(USER_ID),
+        "display_name": "Иван",
+        "email": "ivan@example.ru",
+        "phone": None,
+        "role": "tenant",
+        "is_active": True,
+        "created_at": None,
+    }
+    client, _ = _make(lambda req: httpx.Response(200, json=body))
+    user = await client.get_user_by_email("ivan@example.ru")
+    assert user is not None
+    assert user.id == USER_ID
+
+
+async def test_get_user_by_email_sends_query_and_not_cached() -> None:
+    seen: dict[str, str] = {}
+
+    def _handler(req: httpx.Request) -> httpx.Response:
+        seen["email"] = req.url.params.get("email", "")
+        seen["path"] = req.url.path
+        return httpx.Response(
+            200,
+            json={
+                "id": str(USER_ID),
+                "display_name": "И",
+                "email": "ivan@example.ru",
+                "phone": None,
+                "role": "tenant",
+                "is_active": True,
+                "created_at": None,
+            },
+        )
+
+    client, cache = _make(_handler)
+    await client.get_user_by_email("ivan@example.ru")
+    assert seen["email"] == "ivan@example.ru"
+    assert seen["path"] == "/api/v1/users"
+    # ФЗ-152: резолв по email НЕ кешируется (email — ПДн, не в Redis-ключ).
+    assert await cache.get("platform:user_by_email:ivan@example.ru") is None
+
+
+async def test_get_user_by_email_404_returns_none() -> None:
+    client, _ = _make(lambda req: httpx.Response(404))
+    assert await client.get_user_by_email("nobody@example.ru") is None
