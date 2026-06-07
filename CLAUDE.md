@@ -285,6 +285,34 @@ npx @stoplight/prism-cli mock docs/handoff/01_postanovka/04_openapi.yaml --port 
 pytest tests/contract/
 ```
 
+## CI/CD и deploy — помнить всегда
+
+- `CI` и `Build & Deploy KB Support` — разные workflow. Зелёный `CI` не
+  означает, что kb-support уже live.
+- Статус “live” проверяется только по зелёному `Build & Deploy KB Support`
+  (`build-and-push`, `deploy-staging`, `deploy-prod`).
+- Deploy workflow работает против живого `/app/docker-compose.yml` на сервере
+  `95.213.154.92`, а не против `backend/docker-compose.yml` из репозитория.
+- Корректные service names для kb-support в `/app/docker-compose.yml`:
+  `postgres-support`, `kb-support-backend`, `kb-support-frontend`.
+  Имя `kb-support-postgres` неверно.
+- Registry secrets:
+  `SELECTEL_CR_URL=cr.selcloud.ru/rehome`,
+  `SELECTEL_CR_TOKEN_USER=token`,
+  `SELECTEL_CR_PUSH_TOKEN=<40-char token>`,
+  `SELECTEL_CR_PULL_TOKEN=<40-char token>`.
+- SSH secrets:
+  `HOST=95.213.154.92`,
+  `USERNAME=root`,
+  `SSH_PRIVATE_KEY=<private key>`.
+- Warnings про `UNISENDER_GO_API_KEY`, `DADATA_*`, `SMSRU_*`,
+  `REPUTATION_RU_TOKEN` в deploy логах не фатальны сами по себе. Это optional
+  env vars из shared compose-файла.
+- Failure в GitHub-hosted CI на этапе service container startup с
+  `docker pull postgres:16-alpine` / timeout до `registry-1.docker.io` —
+  это внешний Docker Hub / runner network flake, не автоматический regression
+  проекта.
+
 ## Версионирование коммитов (Conventional Commits)
 
 Формат:
