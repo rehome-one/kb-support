@@ -244,6 +244,29 @@ def test_kb_files_off_defers_attachments() -> None:
     _in_rolled_back_session(body)
 
 
+def test_kb_files_upload_failure_defers_without_losing_email() -> None:
+    """Сбой загрузки вложения (kb-files доступен, но upload падает) НЕ теряет письмо:
+    заявка/сообщение создаются, file_id не сохраняется, число сбоев — в custom_fields."""
+
+    async def body(session: AsyncSession) -> None:
+        att = ParsedAttachment(
+            filename="doc.pdf", content_type="application/pdf", content=b"PDF", size=3
+        )
+        result = await ingest_email(
+            session,
+            _email(attachments=(att,), body="письмо со сбойным вложением"),
+            platform_client=None,
+            kb_files_client=_FakeKbFiles(fail=True),
+        )
+        assert result.created is True  # письмо не потеряно
+        msgs = await _messages(session, result.ticket.id)
+        assert msgs[0].body == "письмо со сбойным вложением"
+        assert msgs[0].attachments == []  # сбойная загрузка → file_id нет
+        assert result.ticket.custom_fields["email_attachments_deferred"]["failed_count"] == 1
+
+    _in_rolled_back_session(body)
+
+
 def test_spoofed_from_reply_does_not_change_ticket_requester() -> None:
     """Security (NFR-1.3/anti-spoofing): ответ с ЧУЖИМ From на активную заявку НЕ меняет
     requester заявки; автор сообщения — sentinel (platform off), не исходный заявитель."""
