@@ -50,6 +50,8 @@ WORKDIR /app
 
 COPY --from=builder /install /install
 COPY src ./src
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 
 USER app
 
