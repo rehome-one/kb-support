@@ -1,8 +1,10 @@
 """ORM-модель Ticket — центральная сущность kb-support (ТЗ v2.2 §3.1).
 
-Базовая версия E1. Поля претензионных типов (§3.1.1: case_state, claim_amount,
-decision, ... ) и связанная сущность TicketCaseDetails (§3.11) НЕ включены —
-это E10 (#23), добавятся отдельной миграцией.
+Базовая версия E1 + поля претензионных типов (§3.1.1: case_state, claim_amount,
+decision, ... ) и связанная сущность `TicketCaseDetails` (§3.11) добавлены в E10-1
+(#191, ADR-0013 D4). Денежные суммы хранятся как `Numeric` (точное хранение;
+kb-support деньги НЕ считает, только хранит/отображает — FR-9.8). Ссылки на upstream
+(`linked_payment_id` и т.п.) — UUID БЕЗ FK (арх-константа, ссылки разрешаются по сети).
 
 Перечисления домена — в `api.tickets.enums`; в БД хранятся как `String`
 (решение Архитектора 2026-05-30, Issue #5: настраиваемые справочники §3.2/§3.3,
@@ -20,9 +22,22 @@ from __future__ import annotations
 
 import datetime
 import uuid
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import ARRAY, DateTime, Index, Integer, String, Text, UniqueConstraint, Uuid, text
+from sqlalchemy import (
+    ARRAY,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -124,5 +139,53 @@ class Ticket(TimestampMixin, Base):
     rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rating_comment: Mapped[str | None] = mapped_column(Text(), nullable=True)
 
+    # --- Претензионные типы (E10-1 #191, §3.1.1, ADR-0013 D4). Все nullable (заполнены
+    # только у claims-типов). Суммы — Numeric (точное хранение; деньги не считаем, FR-9.8).
+    # *_id — UUID БЕЗ FK (ссылки на upstream-сущности, разрешаются по сети, арх-константа). ---
+    case_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    claim_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    approved_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    decision: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    decision_reason: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    decision_notified_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    payout_due_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    linked_payment_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(), nullable=True)
+    regress_obligation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(), nullable=True)
+    policy_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(), nullable=True)
+    insurance_event_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(), nullable=True)
+    acceptance_act_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(), nullable=True)
+
     def __repr__(self) -> str:
         return f"<Ticket id={self.id!r} number={self.number!r} status={self.status!r}>"
+
+
+class TicketCaseDetails(TimestampMixin, Base):
+    """Детали претензионного обращения 1:1 к Ticket (§3.11, ADR-0013 D4).
+
+    Тип-специфичный `payload` — JSONB (валидируется `case_payload.validate_case_payload`
+    по `case_type`); `act_kind`/`signing_status` — typed top-level по контракту (не внутри
+    payload). FK на свою таблицу `tickets` — ON DELETE CASCADE (деталь живёт с заявкой).
+    """
+
+    __tablename__ = "ticket_case_details"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(), primary_key=True, default=uuid.uuid4)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(),
+        ForeignKey("tickets.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,  # 1:1 с Ticket
+    )
+    case_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    act_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    signing_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+
+    def __repr__(self) -> str:
+        return f"<TicketCaseDetails ticket_id={self.ticket_id!r} case_type={self.case_type!r}>"
