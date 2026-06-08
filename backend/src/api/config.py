@@ -224,6 +224,39 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- IMAP-приём входящего email (E7-4, #146, ADR-0005 Реш.3 / ADR-0010 Реш.1).
+    # Dramatiq-actor `poll_inbox` тянет UNSEEN-письма из ящика поддержки и отдаёт в
+    # ingestion (#145). Двойной gate: единый `sla_worker_broker_url` (StubBroker →
+    # actor не enqueue'ится) И ПУСТОЙ `imap_host` (проход — no-op, даже при поднятом
+    # broker). Боевой путь — после ops (broker/worker #79 + IMAP-креды). ---
+    imap_host: str = Field(
+        default="",
+        description="Хост IMAP-сервера ящика поддержки. ПУСТО → приём выключен (no-op проход).",
+    )
+    imap_port: int = Field(default=993, ge=1, le=65535, description="Порт IMAP (993 = IMAPS).")
+    imap_username: str = Field(default="", description="Логин IMAP (из секретов окружения).")
+    imap_password: str = Field(default="", description="Пароль IMAP (из секретов; не логируется).")
+    imap_mailbox: str = Field(default="INBOX", description="Папка-источник входящих писем.")
+    imap_use_ssl: bool = Field(
+        default=True,
+        description="IMAPS с проверкой сертификата (create_default_context). НЕ отключать в проде.",
+    )
+    imap_processed_mailbox: str = Field(
+        default="",
+        description=(
+            "Папка, КУДА переносить обработанное письмо после ingest (Д1). ПУСТО → только "
+            "пометка \\Seen без переноса."
+        ),
+    )
+    imap_poll_batch_limit: int = Field(
+        default=50,
+        ge=1,
+        description=(
+            "Максимум писем за один проход poll_inbox. Защита от чрезмерной выборки; при "
+            "достижении лимита — WARN (остаток разберёт следующий проход)."
+        ),
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
