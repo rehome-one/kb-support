@@ -277,6 +277,19 @@ class Settings(BaseSettings):
         description="From исходящих писем (служебный адрес поддержки = ящик приёма IMAP #146).",
     )
 
+    # --- Уведомления push/SMS (E7-9, #150, ADR-0010 Реш.5) — config-gated SEAM'ы.
+    # ПУСТОЙ токен = канал выключен (intent-log без ПДн, не планируется). Боевая
+    # доставка (Exolve SMS + push-провайдер) + резолв получателя — follow-up #161
+    # после ops (creds) и #77 (m2m). Базовые URL/from — в #161 (здесь не читаются). ---
+    sms_api_token: str = Field(
+        default="",
+        description="Токен SMS-провайдера (Exolve). ПУСТО → SMS-канал выключен (seam, #161).",
+    )
+    push_api_token: str = Field(
+        default="",
+        description="Токен push-провайдера. ПУСТО → push-канал выключен (seam, #161).",
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

@@ -29,6 +29,7 @@ from api.email.outbound import (
     email_recipient,
     maybe_schedule_email,
 )
+from api.notifications.channels import maybe_schedule_push, maybe_schedule_sms
 from api.notifications.dedup import (
     clear_status_notified,
     last_status_notified,
@@ -38,7 +39,7 @@ from api.notifications.labels import NOTIFIED_STATUSES, status_label
 from api.observability.logging import get_logger
 from api.tickets.chat_return import maybe_schedule_return
 from api.tickets.enums import TicketChannel
-from api.tickets.messages import TicketMessage
+from api.tickets.messages import TicketMessage, is_public_operator_reply
 from api.tickets.models import Ticket
 
 _logger = get_logger("notifications")
@@ -48,8 +49,8 @@ def notify_message(
     background: BackgroundTasks, ticket: Ticket, message: TicketMessage, settings: Settings
 ) -> None:
     """Веер уведомления о новом сообщении (ответ оператора) по каналам. Best-effort:
-    сбой планирования одного канала не мешает прочим. Каналы наследуют свои gate'ы
-    (NFR-1.3, config-gate). push/SMS — seam #150."""
+    сбой планирования одного канала не мешает прочим. chat/email наследуют свои gate'ы
+    (NFR-1.3, config-gate)."""
     for channel, schedule in (
         ("chat", maybe_schedule_return),
         ("email", maybe_schedule_email),
@@ -58,6 +59,22 @@ def notify_message(
             schedule(background, ticket, message, settings)
         except Exception:  # изоляция канала — один сбой не валит остальные
             _logger.warning("notify_message channel failed: %s", channel)
+    # push/SMS seam'ы (#150): у них нет message-based gate, поэтому NFR-1.3 проверяем здесь —
+    # уведомляем только о ПУБЛИЧНОМ ответе оператора (внутренняя заметка → ни push, ни SMS).
+    if is_public_operator_reply(message):
+        _fan_out_push_sms(background, ticket, "Новый ответ оператора", settings)
+
+
+def _fan_out_push_sms(
+    background: BackgroundTasks, ticket: Ticket, summary: str, settings: Settings
+) -> None:
+    """Веер seam-каналов push/SMS (#150), best-effort изолированно. Дедуп — общий для
+    события (per-status маркер #149, не per-channel): push/SMS делят то же решение."""
+    for channel, schedule in (("push", maybe_schedule_push), ("sms", maybe_schedule_sms)):
+        try:
+            schedule(background, ticket, summary, settings)
+        except Exception:
+            _logger.warning("push/sms channel failed: %s", channel)
 
 
 @dataclass(frozen=True)
@@ -102,6 +119,8 @@ def schedule_status_notification(
         _schedule_status_chat(background, ticket, notice.new_status, settings)
     except Exception:
         _logger.warning("status notify channel failed: chat")
+    # push/SMS seam'ы (#150): сводка — RU-лейбл нового статуса (без ПДн).
+    _fan_out_push_sms(background, ticket, status_label(notice.new_status), settings)
 
 
 def _schedule_status_email(
