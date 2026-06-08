@@ -53,6 +53,21 @@ export function TicketDetail({ ticket }: { ticket: Ticket }) {
           <p className="whitespace-pre-wrap text-sm">{ticket.description}</p>
         </div>
       ) : null}
+
+      {/* Оценка качества (FR-8.1, #185): read-only. Оценку ставит заявитель в ЛК (ADR-0012 D1). */}
+      <div className="flex flex-col gap-1">
+        <h2 className="text-xs text-gray-500">Оценка качества</h2>
+        {ticket.rating == null ? (
+          <p className="text-sm text-gray-400">не оценена</p>
+        ) : (
+          <>
+            <p className="text-sm">{`${ticket.rating} / 5`}</p>
+            {ticket.rating_comment ? (
+              <p className="whitespace-pre-wrap text-sm text-gray-700">{ticket.rating_comment}</p>
+            ) : null}
+          </>
+        )}
+      </div>
     </section>
   );
 }
