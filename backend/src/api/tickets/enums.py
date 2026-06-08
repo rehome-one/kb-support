@@ -114,3 +114,55 @@ class AccessLevel(str, enum.Enum):
     STAFF = "STAFF"
     LEGAL = "LEGAL"
     HR_RESTRICTED = "HR_RESTRICTED"
+
+
+# --- Претензионные типы (E10, §3.2.1/3.3/3.11, ADR-0013). Домены — из immutable-контракта
+# (docs/openapi.yaml). String-хранение + валидация Python-энумом (без native PG ENUM, §3.2/3.3).
+
+
+class CaseType(str, enum.Enum):
+    """Тип претензионного обращения (§3.11, TicketCaseDetails.case_type)."""
+
+    COMPENSATION = "COMPENSATION"
+    GUARANTEE = "GUARANTEE"
+    INSURANCE = "INSURANCE"
+    ACCEPTANCE_ACT = "ACCEPTANCE_ACT"
+
+
+class TicketCaseState(str, enum.Enum):
+    """Состояние разбирательства (§3.2.1). Ведётся параллельно базовому status.
+
+    ТЗ задаёт линейную цепочку; детальная таблица переходов — `case_state_machine` (E10-2,
+    ADR-0013 D5). Терминалы: PAID, REJECTED."""
+
+    CLAIM_SUBMITTED = "CLAIM_SUBMITTED"
+    DOCS_PENDING = "DOCS_PENDING"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    INSPECTION = "INSPECTION"
+    DECISION_MADE = "DECISION_MADE"
+    PAYOUT_PENDING = "PAYOUT_PENDING"
+    PAID = "PAID"
+    REJECTED = "REJECTED"
+
+
+class TicketDecision(str, enum.Enum):
+    """Решение по претензии (Договор 5.8.8). reason обязателен при PARTIAL/REJECTED (E10-3)."""
+
+    FULL = "FULL"
+    PARTIAL = "PARTIAL"
+    REJECTED = "REJECTED"
+
+
+class ActKind(str, enum.Enum):
+    """Тип акта приёма-передачи (§3.3.4). MOVE_OUT+ущерб → каскад COMPENSATION (D9, E10-9)."""
+
+    MOVE_IN = "MOVE_IN"
+    MOVE_OUT = "MOVE_OUT"
+
+
+class SigningStatus(str, enum.Enum):
+    """Статус двустороннего SMS-OTP подписания акта (§3.3.4)."""
+
+    ONE_SIGNED = "one_signed"
+    BOTH_SIGNED = "both_signed"
+    DISPUTED = "disputed"

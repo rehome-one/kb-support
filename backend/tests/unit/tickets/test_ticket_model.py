@@ -48,8 +48,36 @@ ALL_COLUMNS = {
     "custom_fields",
     "rating",
     "rating_comment",
+    # --- Претензионные типы (§3.1.1, E10-1 #191) ---
+    "case_state",
+    "claim_amount",
+    "approved_amount",
+    "decision",
+    "decision_reason",
+    "decision_notified_at",
+    "payout_due_at",
+    "linked_payment_id",
+    "regress_obligation_id",
+    "policy_id",
+    "insurance_event_id",
+    "acceptance_act_id",
     "created_at",
     "updated_at",
+}
+
+CLAIMS_COLUMNS = {
+    "case_state",
+    "claim_amount",
+    "approved_amount",
+    "decision",
+    "decision_reason",
+    "decision_notified_at",
+    "payout_due_at",
+    "linked_payment_id",
+    "regress_obligation_id",
+    "policy_id",
+    "insurance_event_id",
+    "acceptance_act_id",
 }
 
 REFERENCE_ID_COLUMNS = {
@@ -88,28 +116,16 @@ def test_tablename() -> None:
 
 
 def test_has_exactly_expected_columns() -> None:
-    """Полнота охвата §3.1 — ни лишних, ни недостающих колонок.
-
-    Поля §3.1.1 (claims) сознательно отсутствуют — это E10.
-    """
+    """Полнота охвата §3.1 + §3.1.1 (claims, E10-1) — ни лишних, ни недостающих колонок."""
     assert set(TABLE.columns.keys()) == ALL_COLUMNS
 
 
-def test_claims_fields_absent() -> None:
-    """Поля претензионных типов (§3.1.1) не должны появиться раньше E10."""
-    cols = set(TABLE.columns.keys())
-    claims = {
-        "case_state",
-        "claim_amount",
-        "approved_amount",
-        "decision",
-        "decision_reason",
-        "linked_payment_id",
-        "policy_id",
-        "insurance_event_id",
-        "acceptance_act_id",
-    }
-    assert cols.isdisjoint(claims)
+def test_claims_fields_present() -> None:
+    """Поля претензионных типов (§3.1.1) добавлены в E10-1 (#191) — все nullable."""
+    cols = TABLE.columns
+    for name in CLAIMS_COLUMNS:
+        assert name in cols, f"{name} должна присутствовать (E10-1)"
+        assert cols[name].nullable is True, f"{name} должна быть nullable"
 
 
 def test_not_null_columns() -> None:
