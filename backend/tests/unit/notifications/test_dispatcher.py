@@ -319,12 +319,28 @@ def test_low_rating_none_rating_no_task() -> None:
     assert len(bg.tasks) == 0
 
 
-def test_low_rating_comment_in_body_not_logged(caplog: pytest.LogCaptureFixture) -> None:
+def test_low_rating_comment_in_body_not_logged(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Логгер `api.*` имеет propagate=False (configure_logging) → caplog ненадёжен; патчим
+    # сам _logger и инспектируем ВСЕ его вызовы (load-bearing: логирование комментария
+    # уронит тест). Урок #71.
+    import unittest.mock as mock
+
+    logger_spy = mock.MagicMock()
+    monkeypatch.setattr(dispatcher, "_logger", logger_spy)
     bg = BackgroundTasks()
-    with caplog.at_level("DEBUG"):
-        dispatcher.notify_low_rating(
-            bg, _rated_ticket(rating=1, comment="ПДн-секрет"), _low_settings()
-        )
+    dispatcher.notify_low_rating(bg, _rated_ticket(rating=1, comment="ПДн-секрет"), _low_settings())
     email = cast(OutboundEmail, bg.tasks[0].args[0])
     assert "ПДн-секрет" in email.body  # комментарий супервайзеру (внутренний контур) — допустим
-    assert "ПДн-секрет" not in caplog.text  # но НЕ в логах (ФЗ-152 D6)
+    # ...но НИ ОДИН вызов логгера не содержит комментарий (ФЗ-152 D6).
+    assert "ПДн-секрет" not in str(logger_spy.mock_calls)
+
+
+def test_low_rating_best_effort_does_not_raise() -> None:
+    # Сбой планирования уведомления не должен ронять rate (best-effort, #72). Роутер
+    # зовёт notify_low_rating ПОСЛЕ commit, поэтому рейтинг уже сохранён в любом случае.
+    class _BoomBackground(BackgroundTasks):
+        def add_task(self, *args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("scheduler down")
+
+    # Не бросает наружу (исключение изолировано внутри notify_low_rating).
+    dispatcher.notify_low_rating(_BoomBackground(), _rated_ticket(rating=1), _low_settings())
