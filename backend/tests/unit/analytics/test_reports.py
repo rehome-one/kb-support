@@ -93,6 +93,20 @@ def test_reopens_rate_computed() -> None:
     assert data.rows == [{"total": 5, "reopened": 2, "reopened_rate_pct": 40.0}]
 
 
+class _EmptyReopenRepository:
+    """Fake с пустым reopens-набором (total=0) — пиннит guard деления на ноль."""
+
+    async def reopen_stats(self, period: StatsPeriod) -> tuple[int, int]:
+        return 0, 0
+
+
+def test_reopens_rate_none_when_total_zero() -> None:
+    # Нулевой знаменатель → None (инвариант ADR-0011 Реш.4), не деление на ноль (reports.py).
+    repo = cast("AnalyticsRepository", _EmptyReopenRepository())
+    data = asyncio.run(build_report(repo, ReportType.REOPENS, _PERIOD, now=_NOW))
+    assert data.rows == [{"total": 0, "reopened": 0, "reopened_rate_pct": None}]
+
+
 def test_operators_resolved_anchor_rows() -> None:
     data = _build(ReportType.OPERATORS)
     assert data.rows == [
