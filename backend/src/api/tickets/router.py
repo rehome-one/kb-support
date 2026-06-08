@@ -60,6 +60,7 @@ from api.tickets.requester_context import (
 )
 from api.tickets.schemas import (
     AssignInput,
+    CaseStateTransitionInput,
     EmailIngest,
     EscalateInput,
     Pagination,
@@ -701,4 +702,30 @@ async def rate_ticket(
     await session.refresh(ticket)
     # FR-8.2: низкую оценку (1-2) — супервайзеру fire-after (config-gated seam, #183).
     notify_low_rating(background, ticket, get_settings())
+    return _ticket_envelope(ticket, x_request_id)
+
+
+@router.post(
+    "/{ticket_id}/case-state",
+    response_model=TicketEnvelope,
+    summary="Переход состояния разбирательства",
+)
+async def transition_case_state(
+    ticket_id: uuid.UUID,
+    payload: CaseStateTransitionInput,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    """E10-2 (#192): переход case_state. Запрещённый → 422; PAYOUT_PENDING→PAID требует
+    «4 глаза» (двое разных сотрудников, D6). Гейт — оператор (legal/finance decision — E10-3)."""
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    _require_operator(principal)
+    await TicketActionService(session).transition_case_state(
+        ticket, principal.user_id, target=payload.case_state, note=payload.note
+    )
+    await session.commit()
+    await session.refresh(ticket)
     return _ticket_envelope(ticket, x_request_id)

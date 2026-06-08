@@ -37,6 +37,9 @@ class TicketHistoryAction(str, enum.Enum):
     TAGS_UPDATED = "tags_updated"
     MESSAGE_ADDED = "message_added"
     RATED = "rated"
+    # Претензионные типы (E10-2 #192)
+    CASE_STATE_CHANGED = "case_state_changed"
+    PAYOUT_APPROVAL_RECORDED = "payout_approval_recorded"
 
 
 class TicketHistory(Base):

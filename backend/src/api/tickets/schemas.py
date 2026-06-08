@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from api.tickets.enums import (
     AccessLevel,
     AuthorType,
+    TicketCaseState,
     TicketChannel,
     TicketPriority,
     TicketStatus,
@@ -362,6 +363,15 @@ class RateInput(BaseModel):
 
     rating: int = Field(ge=1, le=5)
     comment: str | None = Field(default=None, max_length=2000)
+
+
+class CaseStateTransitionInput(BaseModel):
+    """Тело POST /tickets/{id}/case-state (контракт transitionCaseState, E10-2)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    case_state: TicketCaseState
+    note: str | None = Field(default=None, max_length=2000)
 
 
 class TicketMessageCreate(BaseModel):
