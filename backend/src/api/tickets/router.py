@@ -21,6 +21,7 @@ from api.canned.usage import record_canned_usage
 from api.clients.kb_files import KbFilesClient
 from api.clients.kb_files.deps import get_kb_files_client
 from api.clients.kb_search import KbSearchClient
+from api.clients.kb_search.deps import get_kb_search_client
 from api.clients.platform import PlatformClient
 from api.config import get_settings
 from api.db import get_session
@@ -87,7 +88,6 @@ from api.tickets.sla_metrics import record_first_response
 from api.tickets.state_machine import is_allowed_transition
 from api.tickets.suggested_articles import (
     SuggestedArticlesEnvelope,
-    get_kb_search_client,
     suggest_for_ticket,
 )
 

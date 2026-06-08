@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import datetime
 from typing import Protocol, runtime_checkable
 
 from api.clients.kb_search.models import (
@@ -32,4 +33,14 @@ class KbSearchClient(Protocol):
 
         `None` — недоступность kb-search/прочая ошибка (деградация AT-003) →
         вызывающий покажет «недоступно»; `[]` — поиск отработал, совпадений нет."""
+        ...
+
+    async def get_containment_stats(
+        self, period_from: datetime.date, period_to: datetime.date
+    ) -> float | None:
+        """Containment rate AI-чата за период (FR-7.3, #166): доля диалогов без эскалации.
+
+        Истинный знаменатель (всего сессий) живёт в kb-search, не у нас. `None` —
+        выключено/недоступность/ошибка (деградация AT-003) → вызывающий покажет
+        `degraded`; иначе — процент (0..100)."""
         ...

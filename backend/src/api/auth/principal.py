@@ -14,7 +14,7 @@ import enum
 import uuid
 from dataclasses import dataclass, field
 
-from api.auth.scopes import STAFF_ADMIN_SCOPE, STAFF_SUPPORT_SCOPE
+from api.auth.scopes import STAFF_ADMIN_SCOPE, STAFF_SUPERVISOR_SCOPE, STAFF_SUPPORT_SCOPE
 from api.tickets.enums import TicketTeam
 
 
@@ -63,3 +63,12 @@ class Principal:
 
         Гранулярное право из проверенного токена (ADR-0009); см. `auth/scopes.py`."""
         return STAFF_SUPPORT_SCOPE in self.scopes
+
+    @property
+    def is_staff_supervisor(self) -> bool:
+        """Есть ли у субъекта скоуп супервайзера (аналитика — панель/отчёты, FR-7.1/7.2).
+
+        **Аддитивно** (ADR-0011 Решение 1): проверяет СТРОГО наличие `staff_supervisor` в
+        токене, НЕ выводит из `staff_support` и наоборот — Keycloak выдаёт супервайзеру оба
+        скоупа отдельно. См. `auth/scopes.py`."""
+        return STAFF_SUPERVISOR_SCOPE in self.scopes

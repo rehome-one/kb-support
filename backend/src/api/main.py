@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import JSONResponse, Response
 
 from api import __version__
+from api.analytics.router import router as analytics_router
 from api.automation.router import router as automation_router
 from api.canned.router import router as canned_router
 from api.config import get_settings
@@ -44,6 +45,7 @@ app.include_router(tickets_router)
 app.include_router(sla_router)
 app.include_router(automation_router)
 app.include_router(canned_router)
+app.include_router(analytics_router)
 
 
 class HealthzResponse(BaseModel):

@@ -1420,7 +1420,10 @@ paths:
       tags:
       - Analytics
       summary: Метрики поддержки
-      description: Сводные метрики за период для панели супервайзера и дашборда Grafana.
+      description: >-
+        Сводные метрики за период для панели супервайзера и дашборда Grafana.
+        scope=staff_supervisor (оператор без него → 403). Период — UTC, from/to
+        включительно; без параметров — последние 30 дней.
       operationId: getSupportStats
       parameters:
       - name: from
@@ -1445,8 +1448,12 @@ paths:
                   properties:
                     data:
                       $ref: '#/components/schemas/SupportStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/support/reports/{type}:
     get:
       tags:
@@ -3019,25 +3026,37 @@ components:
           type: object
           properties:
             first_response_compliance_pct:
-              type: number
+              type:
+              - number
+              - 'null'
             resolution_compliance_pct:
-              type: number
+              type:
+              - number
+              - 'null'
             breaches:
               type: integer
         performance:
           type: object
           properties:
             avg_first_response_minutes:
-              type: number
+              type:
+              - number
+              - 'null'
             avg_resolution_minutes:
-              type: number
+              type:
+              - number
+              - 'null'
             reopened_rate_pct:
-              type: number
+              type:
+              - number
+              - 'null'
         quality:
           type: object
           properties:
             avg_rating:
-              type: number
+              type:
+              - number
+              - 'null'
             ratings_count:
               type: integer
         ai_chat:
@@ -3045,10 +3064,15 @@ components:
           description: Метрики первой линии (kb-search)
           properties:
             containment_rate_pct:
-              type: number
-              description: Доля диалогов без эскалации
+              type:
+              - number
+              - 'null'
+              description: Доля диалогов без эскалации (null — kb-search недоступен/выключен)
             escalated_count:
               type: integer
+            degraded:
+              type: boolean
+              description: containment недоступен (kb-search seam выключен/деградация)
     TicketCaseDetails:
       type: object
       description: Детали претензионного обращения (1:1 с Ticket, раздел 3.11 ТЗ)
