@@ -482,6 +482,20 @@ def test_close_from_resolved(client: TestClient) -> None:
     assert resp.json()["data"]["closed_at"] is not None
 
 
+def test_close_sets_rating_cta_marker(client: TestClient) -> None:
+    # FR-8.1 (#184): закрытие неоценённой заявки выставляет дедуп-маркер CTA в той же
+    # транзакции (in-transaction prepare_rating_cta). Сосуществует со статус-маркером.
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, TicketStatus.RESOLVED.value)
+    resp = _action(client, ticket_id, "close")
+    assert resp.status_code == 200
+    # Маркер выставлен в той же транзакции на реальном close-пути и персистится.
+    # (Сосуществование с last_status_notified покрыто unit-тестом — здесь actor==requester,
+    # статус-уведомление само-спам подавляется.)
+    assert resp.json()["data"]["custom_fields"]["notifications"]["rating_cta_sent"] is True
+
+
 def test_close_from_open_is_conflict(client: TestClient) -> None:
     _use(_operator())
     ticket_id = _create(client).json()["data"]["id"]
