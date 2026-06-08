@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import datetime
 import uuid
 
@@ -16,10 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal, PrincipalKind
 from api.canned.usage import record_canned_usage
+from api.clients.kb_files import KbFilesClient
+from api.clients.kb_files.deps import get_kb_files_client
 from api.clients.kb_search import KbSearchClient
 from api.clients.platform import PlatformClient
 from api.config import get_settings
 from api.db import get_session
+from api.email.ingestion import ingest_email
+from api.email.parser import parse_email
 from api.errors import ProblemException
 from api.tickets.actions import TicketActionService
 from api.tickets.chat_return import maybe_schedule_return
@@ -46,6 +52,7 @@ from api.tickets.requester_context import (
 )
 from api.tickets.schemas import (
     AssignInput,
+    EmailIngest,
     EscalateInput,
     Pagination,
     RateInput,
@@ -236,6 +243,51 @@ async def create_ticket_from_web_form(
     await session.commit()
     await session.refresh(ticket)
     return _ticket_envelope(ticket, x_request_id)
+
+
+@router.post(
+    "/from-email",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TicketEnvelope,
+    summary="Принять входящее письмо (email-шлюз)",
+)
+async def create_ticket_from_email(
+    payload: EmailIngest,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    platform_client: PlatformClient | None = Depends(get_platform_client),
+    kb_files_client: KbFilesClient | None = Depends(get_kb_files_client),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    # m2m-only (email-шлюз). Отправитель резолвится сервером из письма (anti-spoofing,
+    # ADR-0010 Решение 3) — endpoint обязан быть закрыт для не-SERVICE принципалов,
+    # иначе заявитель «пришлёт письмо» от чужого имени. Контур тонкий: декод → парсер
+    # #144 → ingest_email (вся логика дедупа/резолва/вложений — ядро PR-A).
+    if principal.kind is not PrincipalKind.SERVICE:
+        raise ProblemException.forbidden(detail="Email ingestion is a service-to-service operation")
+    settings = get_settings()
+    # Битый base64 — транспортная ошибка (до парсинга) → 400. raw_message в ошибку/лог
+    # НЕ попадает (ФЗ-152). Декод строгий (validate=True): мусор не «доедается» молча.
+    try:
+        raw = base64.b64decode(payload.raw_message, validate=True)
+    except (binascii.Error, ValueError):
+        raise ProblemException.bad_request(detail="raw_message is not valid base64") from None
+    # Anti-DoS: цельное письмо целиком декодируется в память до парсинга → лимит на
+    # размер тела (отдельно от лимита вложений). Превышение → 422 (решение Архитектора).
+    if len(raw) > settings.email_raw_max_bytes:
+        raise ProblemException.unprocessable(detail="email message exceeds size limit")
+    # Malformed RFC822 НЕ ошибка контура: парсер #144 malformed-safe (parse_error в
+    # ParsedEmail) → письмо принимается, email_parse_error в custom_fields (оператор видит).
+    parsed = parse_email(raw, max_attachment_bytes=settings.email_attachment_max_bytes)
+    result = await ingest_email(
+        session, parsed, platform_client=platform_client, kb_files_client=kb_files_client
+    )
+    # ingest_email только flush'ит (commit за вызывающим); recovery-ветка внутри сама
+    # делает rollback и перечитывает заявку через session.get → result.ticket валиден
+    # после commit/refresh. created/deduped в контракт не выносим — 201 + ссылка.
+    await session.commit()
+    await session.refresh(result.ticket)
+    return _ticket_envelope(result.ticket, x_request_id)
 
 
 @router.get("", response_model=TicketListEnvelope, summary="Список заявок")

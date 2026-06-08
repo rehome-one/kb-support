@@ -36,6 +36,15 @@ class ProblemException(Exception):
         super().__init__(title)
 
     @classmethod
+    def bad_request(cls, detail: str | None = None) -> ProblemException:
+        return cls(
+            status=400,
+            title="Bad Request",
+            type_=f"{_ERROR_BASE}/bad-request",
+            detail=detail,
+        )
+
+    @classmethod
     def unauthorized(cls, detail: str | None = None) -> ProblemException:
         return cls(
             status=401,

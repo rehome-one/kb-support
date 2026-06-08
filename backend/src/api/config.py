@@ -62,6 +62,25 @@ class Settings(BaseSettings):
             "от злоупотребления размером тела; превышение → 422."
         ),
     )
+    email_raw_max_bytes: int = Field(
+        default=26 * 1024 * 1024,
+        ge=1,
+        description=(
+            "Максимальный размер декодированного RFC822-письма в байтах при приёме "
+            "через POST /tickets/from-email (E7-3, #145). Защита от memory-DoS на "
+            "входе шлюза; превышение → 422. Лимит на тело письма целиком (не на "
+            "отдельные вложения — для них email_attachment_max_bytes)."
+        ),
+    )
+    email_attachment_max_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        ge=1,
+        description=(
+            "Максимальный размер одного вложения входящего email в байтах (E7-3, "
+            "#145). Передаётся в парсер; вложения сверх лимита отсекаются "
+            "(email_oversized_attachments в custom_fields), письмо принимается."
+        ),
+    )
     # --- Keycloak Bearer JWT (#29). Пустой auth_jwks_url → auth не сконфигурирован
     # (fail-closed 401). Реалм/issuer/audience задаются в окружении деплоя. ---
     auth_jwks_url: str = Field(

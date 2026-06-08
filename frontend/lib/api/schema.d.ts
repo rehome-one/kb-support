@@ -328,6 +328,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/support/tickets/from-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Принять входящее письмо (email-шлюз)
+         * @description Приём входящего email от шлюза в контуре РФ (FR-1.2, ADR-0010 Решения 1/3/4). m2m-доступ (BearerAuth), только kind=SERVICE — отправитель НЕ доверяется и резолвится сервером из письма (anti-spoofing). Тело — base64-кодированное сырое RFC822-письмо (provisional contract). Поведение: при номере активной заявки в теме письмо добавляется ответом, иначе создаётся новая заявка channel=EMAIL; повторная доставка дедуплицируется по Message-ID. Во всех исходах (создано / добавлено к существующей / дедуп) возвращается 201 со ссылкой на заявку. Malformed-письмо принимается (флаг разбора в заявке), битый base64 → 400, превышение размера тела → 422.
+         */
+        post: operations["createTicketFromEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/support/canned-responses": {
         parameters: {
             query?: never;
@@ -993,6 +1013,11 @@ export interface components {
             premises_id?: string;
             /** Format: uuid */
             booking_id?: string;
+        };
+        /** @description Приём входящего письма (E7-3). raw_message — base64-кодированное сырое RFC822-письмо (provisional contract: JSON-safe носитель байтов). */
+        EmailIngest: {
+            /** @description base64-кодированное сырое RFC822-письмо */
+            raw_message: string;
         };
         CannedResponse: {
             /** Format: uuid */
@@ -2042,6 +2067,39 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    createTicketFromEmail: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Идентификатор запроса для трассировки */
+                "X-Request-Id"?: components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailIngest"];
+            };
+        };
+        responses: {
+            /** @description Заявка создана, дополнена или дедуплицирована (ссылка на заявку) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["Ticket"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["UnprocessableEntity"];

@@ -21,6 +21,7 @@ def test_spec_loads_and_has_core_paths() -> None:
     assert "/api/v1/support/tickets/{id}" in SPEC["paths"]
     assert "/api/v1/support/tickets/from-chat" in SPEC["paths"]
     assert "/api/v1/support/tickets/from-web-form" in SPEC["paths"]
+    assert "/api/v1/support/tickets/from-email" in SPEC["paths"]
     for schema in (
         "Ticket",
         "TicketSummary",
@@ -28,6 +29,7 @@ def test_spec_loads_and_has_core_paths() -> None:
         "ResponseEnvelope",
         "TicketFromChat",
         "WebFormTicketCreate",
+        "EmailIngest",
     ):
         assert schema in SPEC["components"]["schemas"]
 
@@ -57,6 +59,25 @@ def test_create_from_web_form_response_conforms(requester_client: TestClient) ->
     assert resp.status_code == 201, resp.text
     assert resp.json()["data"]["channel"] == "WEB_FORM"
     assert_response_conforms("/api/v1/support/tickets/from-web-form", "post", "201", resp.json())
+
+
+@requires_postgres
+def test_create_from_email_response_conforms(service_client: TestClient) -> None:
+    """Drift-детектор: ответ POST /from-email (201) соответствует Ticket (E7-3, #145)."""
+    import base64
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg["From"] = "sender@example.com"
+    msg["Subject"] = "контракт email"
+    msg["Message-ID"] = f"<{uuid.uuid4()}@mail>"
+    msg.set_content("Тело письма для контракт-теста")
+    raw_b64 = base64.b64encode(msg.as_bytes()).decode("ascii")
+
+    resp = service_client.post("/api/v1/support/tickets/from-email", json={"raw_message": raw_b64})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["data"]["channel"] == "EMAIL"
+    assert_response_conforms("/api/v1/support/tickets/from-email", "post", "201", resp.json())
 
 
 @requires_postgres

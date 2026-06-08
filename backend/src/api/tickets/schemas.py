@@ -99,6 +99,20 @@ class TicketFromChat(BaseModel):
     booking_id: uuid.UUID | None = None
 
 
+class EmailIngest(BaseModel):
+    """Тело POST /tickets/from-email — приём входящего письма от email-шлюза (E7-3, #145).
+
+    `raw_message` — **base64-кодированное сырое RFC822-письмо** (provisional contract:
+    JSON-safe носитель байтов; парсер #144 принимает bytes). Вызов m2m (шлюз → нас),
+    принципал — SERVICE; endpoint ограничен `kind=SERVICE` (anti-spoofing: отправитель
+    резолвится сервером из письма, не из принципала). Лишние поля запрещены.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    raw_message: str = Field(min_length=1)
+
+
 class TicketUpdate(BaseModel):
     """Тело PATCH /tickets/{id} — частичное обновление (контракт `TicketUpdate`).
 
