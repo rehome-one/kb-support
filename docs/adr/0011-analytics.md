@@ -207,9 +207,12 @@ UTC детерминирован и достаточен. Пересмотр (TZ
 - `GET /support/reports/{type}`: типизированные read-only схемы 5 отчётов вместо
   `additionalProperties: true` (whitelist полей) + CSV (`text/csv`); контракт-тест
   AT-002 + реген schema.d.ts. — #167.
-- Метрики `analytics/metrics.py`: `tickets_created_total{type,channel}`,
-  `support_queue_time_seconds` (histogram); **переиспользуют** `sla_breaches_total`
-  (#91), не дублируют. Экспорт через существующий `/metrics`. — #168.
+- Метрики `analytics/metrics.py`: `tickets_created_total{type,channel}` (rate входящих).
+  **`support_queue_time_seconds` НЕ вводится** (уточнение #168): «время в очереди»
+  (created→first_responded) уже = `sla_time_to_first_response_seconds` (TTFR, #91) —
+  отдельная метрика была бы дублем того же интервала на том же событии. **Переиспользуют**
+  `sla_breaches_total`/TTFR/TTR (#91), не дублируют. Containment AI-чата — в `/stats` через
+  seam #166 (знаменателя у нас нет). Экспорт через существующий `/metrics`. — #168.
 - Grafana JSON в `docs/grafana/` + how-to. — #169.
 - Frontend: `app/dashboard/` (панель супервайзера) и `app/reports/` (отчёты +
   CSV-скачивание), server-only fetch токеном на сервере, gate супервайзера. —

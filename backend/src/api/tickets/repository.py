@@ -11,6 +11,7 @@ from sqlalchemy import ColumnElement, and_, literal, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.analytics.metrics import record_ticket_created
 from api.auth.principal import Principal
 from api.automation.enums import AutomationTrigger
 from api.sla.assignment import apply_sla
@@ -152,6 +153,7 @@ class TicketRepository:
         await self._session.flush()
         # SLA-матчинг + дедлайны (E4-3 #87) — после flush (нужен created_at).
         await apply_sla(self._session, ticket)
+        record_ticket_created(ticket)  # rate входящих (FR-7.3, #168)
         # ФЗ-152 / §3.7: первая запись журнала — создание. actor = принципал
         # (для оператора-от-имени-заявителя actor — оператор, requester_id — заявитель).
         await self._history.record(
@@ -248,6 +250,7 @@ class TicketRepository:
         # SLA только для вновь созданной заявки (идемпотентный возврат existing —
         # выше, дедлайны не пересчитываются). После flush — created_at доступен.
         await apply_sla(self._session, ticket)
+        record_ticket_created(ticket)  # rate входящих (FR-7.3, #168) — только new-ветка
         await self._history.record(
             ticket.id,
             principal.user_id,
@@ -283,6 +286,7 @@ class TicketRepository:
         self._session.add(ticket)
         await self._session.flush()
         await apply_sla(self._session, ticket)
+        record_ticket_created(ticket)  # rate входящих (FR-7.3, #168)
         await self._history.record(
             ticket.id,
             requester_id,
