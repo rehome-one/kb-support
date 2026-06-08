@@ -1,10 +1,14 @@
+import Link from "next/link";
+
 import { auth, signOut } from "@/auth";
 
 import { Brand } from "./Brand";
 
 /**
- * Шапка рабочего места оператора: бренд, текущий оператор, выход. Серверный
- * компонент — берёт сессию из Auth.js; форма «Выйти» вызывает серверный signOut.
+ * Шапка рабочего места оператора: бренд, навигация, текущий оператор, выход.
+ * Серверный компонент — берёт сессию из Auth.js; форма «Выйти» вызывает серверный
+ * signOut. Пункт «Панель» (аналитика) виден всем операторам; доступ супервайзера
+ * гейтит бэкенд (403 на странице) — фронт права не вычисляет (ADR-0003).
  */
 export async function OperatorHeader() {
   const session = await auth();
@@ -12,7 +16,17 @@ export async function OperatorHeader() {
 
   return (
     <header className="flex items-center justify-between border-b pb-4">
-      <Brand />
+      <div className="flex items-center gap-6">
+        <Brand />
+        <nav className="flex items-center gap-4 text-sm" aria-label="Навигация">
+          <Link href="/tickets" className="text-gray-600 hover:text-gray-900">
+            Заявки
+          </Link>
+          <Link href="/dashboard" className="text-gray-600 hover:text-gray-900">
+            Панель
+          </Link>
+        </nav>
+      </div>
       <div className="flex items-center gap-3 text-sm">
         <span className="text-gray-500">{operator}</span>
         <form
