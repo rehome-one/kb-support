@@ -257,6 +257,26 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- SMTP-отправка ответа оператора на EMAIL-заявку (E7-5, #147, FR-2.3,
+    # ADR-0010 Реш.1). fire-after BackgroundTasks (как #72); config-gate по ПУСТОМУ
+    # smtp_host (инертно до ops). smtp_from_address ДОЛЖЕН совпадать с ящиком приёма
+    # IMAP (#146), иначе ответы заявителя вернутся не туда. Durable — follow-up #79. ---
+    smtp_host: str = Field(
+        default="",
+        description="Хост SMTP-relay. ПУСТО → отправка ответов по email выключена.",
+    )
+    smtp_port: int = Field(default=587, ge=1, le=65535, description="Порт SMTP (587 = submission).")
+    smtp_username: str = Field(default="", description="Логин SMTP (из секретов окружения).")
+    smtp_password: str = Field(default="", description="Пароль SMTP (из секретов; не логируется).")
+    smtp_use_tls: bool = Field(
+        default=True,
+        description="STARTTLS с проверкой сертификата (create_default_context). НЕ отключать.",
+    )
+    smtp_from_address: str = Field(
+        default="",
+        description="From исходящих писем (служебный адрес поддержки = ящик приёма IMAP #146).",
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
