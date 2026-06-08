@@ -1484,3 +1484,77 @@ def test_decision_unknown_ticket_404(client: TestClient) -> None:
     assert (
         _decide(client, str(uuid.uuid4()), decision="FULL", approved_amount=100).status_code == 404
     )
+
+
+# --- Приём claims (E10-5 #195) ---
+
+
+def _get_case_details(ticket_id: str) -> dict[str, object] | None:
+    """Прочитать TicketCaseDetails (case_type+payload) напрямую из БД, либо None."""
+
+    async def _inner() -> dict[str, object] | None:
+        engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+        try:
+            async with engine.begin() as conn:
+                row = (
+                    await conn.execute(
+                        text(
+                            "SELECT case_type, payload FROM ticket_case_details "
+                            "WHERE ticket_id = :id"
+                        ),
+                        {"id": uuid.UUID(ticket_id)},
+                    )
+                ).first()
+                return {"case_type": row[0], "payload": row[1]} if row else None
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_inner())
+
+
+def test_claims_intake_initializes_case(client: TestClient) -> None:
+    _use(_operator())
+    resp = _create(
+        client,
+        type="COMPENSATION",
+        channel="LK_CLAIM",
+        custom_fields={"claim_amount": 60000, "incident_date": "2026-01-01", "evidence": ["f1"]},
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()["data"]
+    assert data["case_state"] == "CLAIM_SUBMITTED"
+    assert data["claim_amount"] == 60000.0
+    details = _get_case_details(data["id"])
+    assert details is not None
+    assert details["case_type"] == "COMPENSATION"
+    payload = details["payload"]
+    assert isinstance(payload, dict)
+    assert payload.get("independent_appraisal") is True  # >50 000₽ (D10)
+    assert payload.get("late_submission") is True  # вне окна 14 дней
+    assert payload.get("evidence") == ["f1"]
+
+
+def test_claims_intake_small_recent_no_flags(client: TestClient) -> None:
+    _use(_operator())
+    resp = _create(
+        client,
+        type="COMPENSATION",
+        channel="LK_CLAIM",
+        custom_fields={"claim_amount": 1000},
+    )
+    data = resp.json()["data"]
+    assert data["case_state"] == "CLAIM_SUBMITTED"
+    details = _get_case_details(data["id"])
+    assert details is not None
+    payload = details["payload"]
+    assert isinstance(payload, dict)
+    assert "independent_appraisal" not in payload
+    assert "late_submission" not in payload
+
+
+def test_non_claims_ticket_has_no_case(client: TestClient) -> None:
+    _use(_operator())
+    resp = _create(client, type="PAYMENT")  # не претензионный
+    data = resp.json()["data"]
+    assert data["case_state"] is None
+    assert _get_case_details(data["id"]) is None
