@@ -49,4 +49,22 @@ describe("TicketDetail", () => {
     expect(screen.getByText("SLA")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "SLA: Скоро дедлайн" })).toBeInTheDocument();
   });
+
+  it("показывает рейтинг с комментарием (read-only)", () => {
+    render(<TicketDetail ticket={ticket({ rating: 4, rating_comment: "спасибо" })} />);
+    expect(screen.getByText("Оценка качества")).toBeInTheDocument();
+    expect(screen.getByText("4 / 5")).toBeInTheDocument();
+    expect(screen.getByText("спасибо")).toBeInTheDocument();
+  });
+
+  it("показывает рейтинг без комментария", () => {
+    render(<TicketDetail ticket={ticket({ rating: 5, rating_comment: null })} />);
+    expect(screen.getByText("5 / 5")).toBeInTheDocument();
+  });
+
+  it("«не оценена» при отсутствии рейтинга", () => {
+    render(<TicketDetail ticket={ticket({ rating: null })} />);
+    expect(screen.getByText("не оценена")).toBeInTheDocument();
+    expect(screen.queryByText(/\/ 5/)).not.toBeInTheDocument();
+  });
 });
