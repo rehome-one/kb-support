@@ -14,7 +14,12 @@ from typing import Any
 from api.clients.auth import TokenProvider
 from api.clients.base import ResilientHttpClient
 from api.clients.errors import ExternalServiceError
-from api.clients.kb_search.models import ArticleSuggestion, OperatorReply, ReplyOutcome
+from api.clients.kb_search.models import (
+    ArticleSuggestion,
+    OperatorReply,
+    ReplyOutcome,
+    StatusNotification,
+)
 from api.observability.logging import get_logger
 
 _logger = get_logger("clients.kb_search")
@@ -71,6 +76,52 @@ class HttpKbSearchClient:
                 response.status_code,
                 reply.chat_session_id,
                 reply.message_id,
+            )
+            return ReplyOutcome.DEGRADED
+
+        return ReplyOutcome.DELIVERED
+
+    async def send_status_notification(self, notification: StatusNotification) -> ReplyOutcome:
+        # Выделенный путь (E7-8, #149): отдельный провизорный endpoint, НЕ operator-reply
+        # (у статуса нет message_id). Идемпотентность — Idempotency-Key = ticket:status.
+        path = f"/api/v1/chat/sessions/{notification.chat_session_id}/status-notification"
+        token = await self._token_provider.get_token()
+        # provisional contract, see ADR-0006 (форма уточнится с боевым kb-search).
+        body = {
+            "ticket_id": str(notification.ticket_id),
+            "status": notification.status,
+            "status_label": notification.status_label,
+        }
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Idempotency-Key": f"{notification.ticket_id}:{notification.status}",
+        }
+        try:
+            response = await self._http.request(
+                "POST", path, operation="send_status_notification", headers=headers, json=body
+            )
+        except ExternalServiceError:
+            _logger.warning(
+                "kb-search status degraded: session=%s ticket=%s",
+                notification.chat_session_id,
+                notification.ticket_id,
+            )
+            return ReplyOutcome.DEGRADED
+
+        if response.status_code in _SESSION_GONE_STATUSES:
+            _logger.warning(
+                "kb-search status: session gone (status=%d) session=%s ticket=%s",
+                response.status_code,
+                notification.chat_session_id,
+                notification.ticket_id,
+            )
+            return ReplyOutcome.SESSION_GONE
+        if response.status_code >= 400:
+            _logger.warning(
+                "kb-search status degraded: status=%d session=%s ticket=%s",
+                response.status_code,
+                notification.chat_session_id,
+                notification.ticket_id,
             )
             return ReplyOutcome.DEGRADED
 

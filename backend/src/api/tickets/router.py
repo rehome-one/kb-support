@@ -25,11 +25,14 @@ from api.clients.platform import PlatformClient
 from api.config import get_settings
 from api.db import get_session
 from api.email.ingestion import ingest_email
-from api.email.outbound import maybe_schedule_email
 from api.email.parser import parse_email
 from api.errors import ProblemException
+from api.notifications.dispatcher import (
+    notify_message,
+    prepare_status_notification,
+    schedule_status_notification,
+)
 from api.tickets.actions import TicketActionService
-from api.tickets.chat_return import maybe_schedule_return
 from api.tickets.enums import (
     TicketChannel,
     TicketPriority,
@@ -363,6 +366,7 @@ async def get_ticket(
 async def update_ticket(
     ticket_id: uuid.UUID,
     payload: TicketUpdate,
+    background: BackgroundTasks,
     principal: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_session),
     x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
@@ -381,9 +385,14 @@ async def update_ticket(
         raise ProblemException.unprocessable(
             detail=f"Status transition {ticket.status} → {payload.status.value} is not allowed"
         )
+    old_status = ticket.status  # до apply_update (он перетирает ticket.status)
     updated = await repo.apply_update(ticket, payload, principal)
+    # E7-8 (#149): решение об уведомлении + дедуп-маркер пишутся В ЭТОЙ транзакции.
+    notice = prepare_status_notification(updated, old_status, principal.user_id)
     await session.commit()
     await session.refresh(updated)
+    if notice is not None:  # планируем веер каналов после commit (fire-after)
+        schedule_status_notification(background, updated, notice, get_settings())
     return TicketEnvelope(
         data=TicketRead.model_validate(updated),
         request_id=_resolve_request_id(x_request_id),
@@ -538,10 +547,9 @@ async def create_message(
     # E3-4 (#72): публичный ответ оператора по AI_CHAT-заявке возвращается в
     # chat-session фоном (NFR-1.3 gate + плоский DTO извлекается здесь, пока жива
     # сессия; внутренние заметки НЕ уходят). Выключено без kb_search_api_token.
-    maybe_schedule_return(background, ticket, message, get_settings())
-    # E7-5 (#147): публичный ответ оператора по EMAIL-заявке уходит письмом фоном
-    # (NFR-1.3 gate + плоский DTO; internal-заметки НЕ отправляются). Выключено без smtp_host.
-    maybe_schedule_email(background, ticket, message, get_settings())
+    # E7-8 (#149): единая точка веера уведомлений о новом ответе по каналам (chat #72 +
+    # email #147 + будущие push/SMS #150). NFR-1.3/config-gate наследуются каналами.
+    notify_message(background, ticket, message, get_settings())
     return TicketMessageEnvelope(
         data=TicketMessageRead.model_validate(message),
         request_id=_resolve_request_id(x_request_id),
@@ -595,6 +603,7 @@ async def escalate_ticket(
 async def resolve_ticket(
     ticket_id: uuid.UUID,
     payload: ResolveInput,
+    background: BackgroundTasks,
     principal: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_session),
     x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
@@ -603,17 +612,22 @@ async def resolve_ticket(
     if ticket is None:
         raise ProblemException.not_found(detail="Ticket not found")
     _require_operator(principal)
+    old_status = ticket.status
     await TicketActionService(session).resolve(
         ticket, principal.user_id, resolution_note=payload.resolution_note
     )
+    notice = prepare_status_notification(ticket, old_status, principal.user_id)
     await session.commit()
     await session.refresh(ticket)
+    if notice is not None:
+        schedule_status_notification(background, ticket, notice, get_settings())
     return _ticket_envelope(ticket, x_request_id)
 
 
 @router.post("/{ticket_id}/close", response_model=TicketEnvelope, summary="Закрыть заявку")
 async def close_ticket(
     ticket_id: uuid.UUID,
+    background: BackgroundTasks,
     principal: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_session),
     x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
@@ -622,9 +636,13 @@ async def close_ticket(
     if ticket is None:
         raise ProblemException.not_found(detail="Ticket not found")
     _require_operator(principal)
+    old_status = ticket.status
     await TicketActionService(session).close(ticket, principal.user_id)
+    notice = prepare_status_notification(ticket, old_status, principal.user_id)
     await session.commit()
     await session.refresh(ticket)
+    if notice is not None:
+        schedule_status_notification(background, ticket, notice, get_settings())
     return _ticket_envelope(ticket, x_request_id)
 
 
@@ -632,6 +650,7 @@ async def close_ticket(
 async def reopen_ticket(
     ticket_id: uuid.UUID,
     payload: ReopenInput,
+    background: BackgroundTasks,
     principal: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_session),
     x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
@@ -640,9 +659,14 @@ async def reopen_ticket(
     ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
     if ticket is None:
         raise ProblemException.not_found(detail="Ticket not found")
+    old_status = ticket.status
     await TicketActionService(session).reopen(ticket, principal.user_id, reason=payload.reason)
+    # REOPENED не в NOTIFIED_STATUSES → prepare сбросит дедуп-маркер (M2), уведомления нет.
+    notice = prepare_status_notification(ticket, old_status, principal.user_id)
     await session.commit()
     await session.refresh(ticket)
+    if notice is not None:
+        schedule_status_notification(background, ticket, notice, get_settings())
     return _ticket_envelope(ticket, x_request_id)
 
 
