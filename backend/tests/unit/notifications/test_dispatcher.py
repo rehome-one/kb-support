@@ -8,12 +8,13 @@ fan-out ответа по каналам + изоляцию сбоя; решен
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import BackgroundTasks
 
 from api.config import Settings
+from api.email.outbound import OutboundEmail
 from api.notifications import dispatcher
 from api.notifications.dedup import last_status_notified
 from api.notifications.dispatcher import (
@@ -250,3 +251,96 @@ async def test_dispatch_status_to_chat_never_raises(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(dispatcher, "HttpKbSearchClient", _BoomClient)
     # Фоновый таск не должен ронять процесс.
     await dispatcher.dispatch_status_to_chat(_notification(), _settings())
+
+
+# --- notify_low_rating (FR-8.2, #183) ---
+
+
+def _rated_ticket(*, rating: int | None, comment: str | None = None) -> Ticket:
+    return Ticket(
+        id=uuid.uuid4(),
+        number="RH-2026-00042",
+        subject="Оплата",
+        status=TicketStatus.CLOSED.value,
+        channel=TicketChannel.EMAIL.value,
+        requester_id=_REQUESTER,
+        rating=rating,
+        rating_comment=comment,
+        custom_fields={"email_from": "req@example.com"},
+    )
+
+
+def _low_settings(**over: Any) -> Settings:
+    base: dict[str, Any] = {
+        "smtp_host": "smtp.test",
+        "smtp_from_address": "support@rehome.one",
+        "low_rating_notify_email": "supervisor@rehome.one",
+    }
+    base.update(over)
+    return Settings(**base)
+
+
+def test_low_rating_schedules_email_to_supervisor() -> None:
+    bg = BackgroundTasks()
+    dispatcher.notify_low_rating(bg, _rated_ticket(rating=1, comment="плохо"), _low_settings())
+    assert len(bg.tasks) == 1
+    email = cast(OutboundEmail, bg.tasks[0].args[0])
+    # Адресат — супервайзер из config, НЕ заявитель (ADR-0012 D2).
+    assert email.to_addr == "supervisor@rehome.one"
+    assert email.to_addr != "req@example.com"
+    assert "1/5" in email.subject
+
+
+def test_low_rating_boundary_two_notifies_three_does_not() -> None:
+    bg2 = BackgroundTasks()
+    dispatcher.notify_low_rating(bg2, _rated_ticket(rating=2), _low_settings())
+    assert len(bg2.tasks) == 1  # 2 — низкая
+    bg3 = BackgroundTasks()
+    dispatcher.notify_low_rating(bg3, _rated_ticket(rating=3), _low_settings())
+    assert len(bg3.tasks) == 0  # 3 — не низкая
+
+
+def test_low_rating_config_gated() -> None:
+    # Пустой адресат → нет задачи.
+    bg = BackgroundTasks()
+    dispatcher.notify_low_rating(
+        bg, _rated_ticket(rating=1), _low_settings(low_rating_notify_email="")
+    )
+    assert len(bg.tasks) == 0
+    # Пустой smtp_host → нет задачи (seam инертен).
+    bg2 = BackgroundTasks()
+    dispatcher.notify_low_rating(bg2, _rated_ticket(rating=1), _low_settings(smtp_host=""))
+    assert len(bg2.tasks) == 0
+
+
+def test_low_rating_none_rating_no_task() -> None:
+    bg = BackgroundTasks()
+    dispatcher.notify_low_rating(bg, _rated_ticket(rating=None), _low_settings())
+    assert len(bg.tasks) == 0
+
+
+def test_low_rating_comment_in_body_not_logged(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Логгер `api.*` имеет propagate=False (configure_logging) → caplog ненадёжен; патчим
+    # сам _logger и инспектируем ВСЕ его вызовы (load-bearing: логирование комментария
+    # уронит тест). Урок #71.
+    import unittest.mock as mock
+
+    logger_spy = mock.MagicMock()
+    monkeypatch.setattr(dispatcher, "_logger", logger_spy)
+    bg = BackgroundTasks()
+    dispatcher.notify_low_rating(bg, _rated_ticket(rating=1, comment="ПДн-секрет"), _low_settings())
+    email = cast(OutboundEmail, bg.tasks[0].args[0])
+    assert "ПДн-секрет" in email.body  # комментарий супервайзеру (внутренний контур) — допустим
+    # ...но НИ ОДИН вызов логгера не содержит комментарий (ФЗ-152 D6).
+    assert "ПДн-секрет" not in str(logger_spy.mock_calls)
+
+
+def test_low_rating_best_effort_does_not_raise() -> None:
+    # Сбой планирования уведомления не должен ронять rate (best-effort, #72). Роутер
+    # зовёт notify_low_rating ПОСЛЕ commit, поэтому рейтинг уже сохранён в любом случае.
+    class _BoomBackground(BackgroundTasks):
+        def add_task(self, *args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("scheduler down")
+
+    # Не бросает наружу (исключение изолировано внутри notify_low_rating).
+    dispatcher.notify_low_rating(_BoomBackground(), _rated_ticket(rating=1), _low_settings())

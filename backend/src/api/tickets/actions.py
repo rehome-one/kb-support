@@ -18,6 +18,7 @@ from api.errors import ProblemException
 from api.tickets.enums import TicketStatus, TicketTeam
 from api.tickets.history import TicketHistoryAction, TicketHistoryRepository
 from api.tickets.models import Ticket
+from api.tickets.rating_metrics import record_rating
 from api.tickets.repository import apply_status_side_effects
 from api.tickets.state_machine import is_allowed_transition
 
@@ -155,4 +156,6 @@ class TicketActionService:
             TicketHistoryAction.RATED,
             to_value={"rating": rating, "comment": comment},
         )
-        # Низкая оценка (1-2) → уведомление супервайзера/метрика — FR-8.2, E9 (#22).
+        # Распределение оценок (метрика, in-transaction как #168). Низкую оценку (1-2)
+        # супервайзеру уведомляет роутер fire-after (#183, ADR-0012 D2/D4).
+        record_rating(rating)
