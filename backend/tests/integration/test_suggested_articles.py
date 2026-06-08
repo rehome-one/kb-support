@@ -20,11 +20,11 @@ from sqlalchemy.pool import NullPool
 from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal, PrincipalKind
 from api.clients.kb_search import ArticleSuggestion
+from api.clients.kb_search.deps import get_kb_search_client
 from api.config import get_settings
 from api.db import get_session
 from api.main import app
 from api.tickets.enums import TicketTeam
-from api.tickets.suggested_articles import get_kb_search_client
 
 pytestmark = pytest.mark.skipif(
     "CI" not in os.environ and "POSTGRES_AVAILABLE" not in os.environ,

@@ -245,3 +245,44 @@ async def test_suggest_network_error_degrades_to_none() -> None:
 
     client = _make(_boom, attempts=1)
     assert await client.suggest_articles("x") is None
+
+
+# --- containment stats (E8-2, #166) ---
+
+_FROM = datetime.date(2026, 5, 1)
+_TO = datetime.date(2026, 5, 31)
+
+
+async def test_containment_200_returns_rate() -> None:
+    client = _make(lambda req: httpx.Response(200, json={"containment_rate_pct": 73.5}))
+    assert await client.get_containment_stats(_FROM, _TO) == 73.5
+
+
+async def test_containment_passes_period_as_query_params() -> None:
+    captured: dict[str, str] = {}
+
+    def _handler(req: httpx.Request) -> httpx.Response:
+        captured["from"] = req.url.params["from"]
+        captured["to"] = req.url.params["to"]
+        return httpx.Response(200, json={"containment_rate_pct": 50.0})
+
+    await _make(_handler).get_containment_stats(_FROM, _TO)
+    assert captured == {"from": "2026-05-01", "to": "2026-05-31"}
+
+
+async def test_containment_4xx_degrades_to_none() -> None:
+    client = _make(lambda req: httpx.Response(500), attempts=1)
+    assert await client.get_containment_stats(_FROM, _TO) is None
+
+
+async def test_containment_malformed_degrades_to_none() -> None:
+    client = _make(lambda req: httpx.Response(200, json={"unexpected": 1}))
+    assert await client.get_containment_stats(_FROM, _TO) is None
+
+
+async def test_containment_network_error_degrades_to_none() -> None:
+    def _boom(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    client = _make(_boom, attempts=1)
+    assert await client.get_containment_stats(_FROM, _TO) is None

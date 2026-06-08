@@ -9,6 +9,7 @@ chat_session_id/message_id/исход (идентификаторы, не кон
 
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
 from api.clients.auth import TokenProvider
@@ -158,4 +159,37 @@ class HttpKbSearchClient:
             ]
         except (ValueError, KeyError, TypeError):
             _logger.warning("kb-search suggest degraded: malformed response")
+            return None
+
+    async def get_containment_stats(
+        self, period_from: datetime.date, period_to: datetime.date
+    ) -> float | None:
+        """Containment rate AI-чата за период (FR-7.3, #166). provisional contract, ADR-0006.
+
+        Resilience зеркалит `suggest_articles`: сетевой сбой/circuit-open/4xx-5xx/битый JSON →
+        `None` (деградация AT-003). В лог — только operation/status (период не ПДн, но
+        придерживаемся паттерна без контента)."""
+        token = await self._token_provider.get_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        # provisional contract, see ADR-0006 (форма уточнится с боевым kb-search).
+        params = {"from": period_from.isoformat(), "to": period_to.isoformat()}
+        try:
+            response = await self._http.request(
+                "GET",
+                "/api/v1/analytics/chat-stats",
+                operation="get_containment_stats",
+                headers=headers,
+                params=params,
+            )
+        except ExternalServiceError as exc:
+            _logger.warning("kb-search containment degraded: %s", type(exc).__name__)
+            return None
+        if response.status_code >= 400:
+            _logger.warning("kb-search containment degraded: status=%d", response.status_code)
+            return None
+        try:
+            payload = response.json()
+            return float(payload["containment_rate_pct"])
+        except (ValueError, KeyError, TypeError):
+            _logger.warning("kb-search containment degraded: malformed response")
             return None

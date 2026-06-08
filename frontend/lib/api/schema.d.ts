@@ -579,7 +579,7 @@ export interface paths {
         };
         /**
          * Метрики поддержки
-         * @description Сводные метрики за период для панели супервайзера и дашборда Grafana.
+         * @description Сводные метрики за период для панели супервайзера и дашборда Grafana. scope=staff_supervisor (оператор без него → 403). Период — UTC, from/to включительно; без параметров — последние 30 дней.
          */
         get: operations["getSupportStats"];
         put?: never;
@@ -1304,24 +1304,26 @@ export interface components {
                 };
             };
             sla?: {
-                first_response_compliance_pct?: number;
-                resolution_compliance_pct?: number;
+                first_response_compliance_pct?: number | null;
+                resolution_compliance_pct?: number | null;
                 breaches?: number;
             };
             performance?: {
-                avg_first_response_minutes?: number;
-                avg_resolution_minutes?: number;
-                reopened_rate_pct?: number;
+                avg_first_response_minutes?: number | null;
+                avg_resolution_minutes?: number | null;
+                reopened_rate_pct?: number | null;
             };
             quality?: {
-                avg_rating?: number;
+                avg_rating?: number | null;
                 ratings_count?: number;
             };
             /** @description Метрики первой линии (kb-search) */
             ai_chat?: {
-                /** @description Доля диалогов без эскалации */
-                containment_rate_pct?: number;
+                /** @description Доля диалогов без эскалации (null — kb-search недоступен/выключен) */
+                containment_rate_pct?: number | null;
                 escalated_count?: number;
+                /** @description containment недоступен (kb-search seam выключен/деградация) */
+                degraded?: boolean;
             };
         };
         /** @description Детали претензионного обращения (1:1 с Ticket, раздел 3.11 ТЗ) */
@@ -2633,7 +2635,9 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     getReport: {

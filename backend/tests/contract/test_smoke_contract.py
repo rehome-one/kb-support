@@ -22,6 +22,7 @@ def test_spec_loads_and_has_core_paths() -> None:
     assert "/api/v1/support/tickets/from-chat" in SPEC["paths"]
     assert "/api/v1/support/tickets/from-web-form" in SPEC["paths"]
     assert "/api/v1/support/tickets/from-email" in SPEC["paths"]
+    assert "/api/v1/support/stats" in SPEC["paths"]
     for schema in (
         "Ticket",
         "TicketSummary",
@@ -30,6 +31,7 @@ def test_spec_loads_and_has_core_paths() -> None:
         "TicketFromChat",
         "WebFormTicketCreate",
         "EmailIngest",
+        "SupportStats",
     ):
         assert schema in SPEC["components"]["schemas"]
 
@@ -47,6 +49,19 @@ def test_create_from_chat_response_conforms(service_client: TestClient) -> None:
     )
     assert resp.status_code == 201, resp.text
     assert_response_conforms("/api/v1/support/tickets/from-chat", "post", "201", resp.json())
+
+
+@requires_postgres
+def test_get_support_stats_response_conforms(supervisor_client: TestClient) -> None:
+    """Drift-детектор: ответ GET /stats (200) соответствует SupportStats (E8-2, #166).
+
+    Пустое окно (1990) → детерминированная форма с null/0; kb-search config-gated →
+    ai_chat.degraded. Без X-параметров проверяем конформность конверта + SupportStats."""
+    resp = supervisor_client.get(
+        "/api/v1/support/stats", params={"from": "1990-01-01", "to": "1990-01-31"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert_response_conforms("/api/v1/support/stats", "get", "200", resp.json())
 
 
 @requires_postgres
