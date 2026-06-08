@@ -40,6 +40,7 @@ class TicketHistoryAction(str, enum.Enum):
     # Претензионные типы (E10-2 #192)
     CASE_STATE_CHANGED = "case_state_changed"
     PAYOUT_APPROVAL_RECORDED = "payout_approval_recorded"
+    CASE_DECIDED = "case_decided"  # E10-3 #193
 
 
 class TicketHistory(Base):

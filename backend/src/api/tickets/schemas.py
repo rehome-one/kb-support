@@ -21,6 +21,7 @@ from api.tickets.enums import (
     AuthorType,
     TicketCaseState,
     TicketChannel,
+    TicketDecision,
     TicketPriority,
     TicketStatus,
     TicketTeam,
@@ -372,6 +373,20 @@ class CaseStateTransitionInput(BaseModel):
 
     case_state: TicketCaseState
     note: str | None = Field(default=None, max_length=2000)
+
+
+class DecisionInput(BaseModel):
+    """Тело POST /tickets/{id}/decision (контракт decideTicket, E10-3).
+
+    approved_amount обязателен при FULL/PARTIAL, reason — при PARTIAL/REJECTED; условная
+    обязательность — доменная (422 в сервисе), не схемная.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: TicketDecision
+    approved_amount: float | None = Field(default=None, ge=0)
+    reason: str | None = Field(default=None, max_length=4000)
 
 
 class TicketMessageCreate(BaseModel):
