@@ -11,6 +11,7 @@ performance / quality / ai_chat. Типизированный pydantic-отве�
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 
 from api.analytics.period import StatsPeriod
@@ -94,6 +95,21 @@ class AiChatStats:
 
     containment_rate_pct: float | None
     escalated_count: int
+
+
+@dataclass(frozen=True)
+class OperatorStat:
+    """Эффективность оператора за период (E8-3, #167; отчёт operators).
+
+    **resolved-anchor (решение Архитектора)**: считается по заявкам, РЕШЁННЫМ в периоде
+    (`resolved_at ∈ period`), GROUP BY `assignee_id`. `avg_resolution_minutes` — по тому же
+    набору (`resolved_at − created_at`, нулевой знаменатель → None). ФЗ-152: только uuid
+    оператора + счётчики, без имён/ПДн.
+    """
+
+    operator_id: uuid.UUID
+    resolved_count: int
+    avg_resolution_minutes: float | None
 
 
 @dataclass(frozen=True)

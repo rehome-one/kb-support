@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
 from api.analytics.dto import (
+    OperatorStat,
     PerformanceStats,
     QualityStats,
     SlaStats,
@@ -258,3 +259,66 @@ class AnalyticsRepository:
             )
         ).scalar_one()
         return int(escalated)
+
+    # --- Отчёты (E8-3, #167) ---
+
+    async def rating_distribution(self, period: StatsPeriod) -> dict[int, int]:
+        """Распределение оценок по заявкам, созданным в периоде (rating IS NOT NULL).
+
+        ФЗ-152: читается только числовой `rating`, НЕ `rating_comment`. Возвращает
+        только присутствующие оценки; заполнение полного диапазона 1..5 — на стороне
+        билдера отчёта (`reports.py`)."""
+        rows = (
+            await self._session.execute(
+                select(Ticket.rating, func.count())
+                .where(and_(self._created_in_period(period), Ticket.rating.is_not(None)))
+                .group_by(Ticket.rating)
+            )
+        ).all()
+        return {int(rating): int(count) for rating, count in rows}
+
+    async def reopen_stats(self, period: StatsPeriod) -> tuple[int, int]:
+        """`(total, reopened)` по заявкам, созданным в периоде (reopened = reopened_count > 0)."""
+        total, reopened = (
+            await self._session.execute(
+                select(
+                    func.count(),
+                    func.coalesce(func.sum(case((Ticket.reopened_count > 0, 1), else_=0)), 0),
+                ).where(self._created_in_period(period))
+            )
+        ).one()
+        return int(total), int(reopened)
+
+    async def operator_stats(self, period: StatsPeriod) -> list[OperatorStat]:
+        """Эффективность операторов — **resolved-anchor** (решение Архитектора, #167).
+
+        По заявкам, РЕШЁННЫМ в периоде (`resolved_at ∈ period`) с непустым `assignee_id`,
+        GROUP BY `assignee_id`: `resolved_count` + `avg_resolution_minutes` (wall-clock
+        `resolved_at − created_at` по тому же набору; единый знаменатель). Порядок —
+        по убыванию resolved_count, тай-брейк по operator_id (детерминизм)."""
+        resolved_in_period = and_(
+            Ticket.assignee_id.is_not(None),
+            Ticket.resolved_at >= period.start,
+            Ticket.resolved_at < period.end_exclusive,
+        )
+        resolved_count = func.count()
+        rows = (
+            await self._session.execute(
+                select(
+                    Ticket.assignee_id,
+                    resolved_count,
+                    _avg_minutes(Ticket.resolved_at, Ticket.created_at),
+                )
+                .where(resolved_in_period)
+                .group_by(Ticket.assignee_id)
+                .order_by(resolved_count.desc(), Ticket.assignee_id)
+            )
+        ).all()
+        return [
+            OperatorStat(
+                operator_id=operator_id,
+                resolved_count=int(count),
+                avg_resolution_minutes=_as_float(avg_minutes),
+            )
+            for operator_id, count, avg_minutes in rows
+        ]

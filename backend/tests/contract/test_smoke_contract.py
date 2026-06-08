@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.contract.conftest import (
@@ -62,6 +63,21 @@ def test_get_support_stats_response_conforms(supervisor_client: TestClient) -> N
     )
     assert resp.status_code == 200, resp.text
     assert_response_conforms("/api/v1/support/stats", "get", "200", resp.json())
+
+
+@requires_postgres
+@pytest.mark.parametrize("report_type", ["volume", "sla", "satisfaction", "reopens", "operators"])
+def test_get_report_response_conforms(supervisor_client: TestClient, report_type: str) -> None:
+    """Drift-детектор: ответ GET /reports/{type} (200) соответствует getReport (E8-3, #167).
+
+    Пустое окно (1990) → детерминированная форма; oneOf валидируется по нужной ветке через
+    discriminator `report`."""
+    resp = supervisor_client.get(
+        f"/api/v1/support/reports/{report_type}", params={"from": "1990-01-01", "to": "1990-01-31"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["report"] == report_type
+    assert_response_conforms("/api/v1/support/reports/{type}", "get", "200", resp.json())
 
 
 @requires_postgres
