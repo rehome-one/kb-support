@@ -55,8 +55,10 @@ export type SuggestedArticlesResponse = OkJson<"getSuggestedArticles", 200>;
 export type CannedListResponse = OkJson<"listCannedResponses", 200>;
 export type CannedRenderResponse = OkJson<"renderCannedResponse", 200>;
 export type MessageResponse = OkJson<"createMessage", 201>;
+export type SupportStatsResponse = OkJson<"getSupportStats", 200>;
 export type ListTicketsQuery = NonNullable<operations["listTickets"]["parameters"]["query"]>;
 export type ListMessagesQuery = NonNullable<operations["listMessages"]["parameters"]["query"]>;
+export type SupportStatsQuery = NonNullable<operations["getSupportStats"]["parameters"]["query"]>;
 export type TicketUpdateInput = BodyJson<"updateTicket">;
 export type MessageCreateInput = BodyJson<"createMessage">;
 export type AssignInput = BodyJson<"assignTicket">;
@@ -201,6 +203,15 @@ export function getSuggestedArticles(
   return request<SuggestedArticlesResponse>(`${ticketPath(id)}/suggested-articles`, "GET", {
     deps,
   });
+}
+
+const STATS = "/api/v1/support/stats";
+
+export function getSupportStats(
+  query?: SupportStatsQuery,
+  deps?: ApiFetchDeps,
+): Promise<SupportStatsResponse> {
+  return request<SupportStatsResponse>(STATS, "GET", { query, deps });
 }
 
 const CANNED = "/api/v1/support/canned-responses";
