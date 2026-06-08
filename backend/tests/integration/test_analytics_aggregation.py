@@ -79,9 +79,16 @@ def _ticket(idx: int, *, created: datetime.datetime, status: TicketStatus, **kw:
 
 
 def _seed_window(session: AsyncSession) -> None:
+    """6 заявок в окне 2001-01 — мутационно-стойкий сид (условия MINOR-1/2 ревью PR #174).
+
+    Включает граничные кейсы `completed_at == due_at` (t4 — нарушение по строгому `<`,
+    пиннит границу) и заявку, нарушенную ТОЛЬКО по resolution-ноге (t5 — fr в срок, решение
+    просрочено), чтобы инверсия оператора/строгости в compliance/breach роняла ассерт.
+    Асимметрия met≠missed (3/5 fr, 2/5 res) ловит полную инверсию.
+    """
     session.add_all(
         [
-            # t1: ответ и решение В СРОК; CLOSED; AI_CHAT/PAYMENT; rating=5.
+            # t1: обе ноги В СРОК (строго <); CLOSED; AI_CHAT/PAYMENT; rating=5. Не breach.
             _ticket(
                 1,
                 created=_dt(1, 5),
@@ -94,7 +101,7 @@ def _seed_window(session: AsyncSession) -> None:
                 resolution_due_at=_dt(1, 7),
                 rating=5,
             ),
-            # t2: ОБЕ ноги нарушены; RESOLVED; EMAIL/OTHER; rating=2; reopened.
+            # t2: обе ноги нарушены; RESOLVED; EMAIL/OTHER; rating=2; reopened. breach(res).
             _ticket(
                 2,
                 created=_dt(1, 10),
@@ -108,7 +115,7 @@ def _seed_window(session: AsyncSession) -> None:
                 rating=2,
                 reopened_count=1,
             ),
-            # t3: открыта и просрочена на момент now; AI_CHAT/PAYMENT; без ответа/оценки.
+            # t3: открыта и просрочена на момент now; AI_CHAT/PAYMENT; без ответа. breach(fr+res).
             _ticket(
                 3,
                 created=_dt(1, 15),
@@ -117,6 +124,46 @@ def _seed_window(session: AsyncSession) -> None:
                 channel=TicketChannel.AI_CHAT.value,
                 first_response_due_at=_dt(1, 15, 0, 15),
                 resolution_due_at=_dt(1, 20),
+            ),
+            # t4: ГРАНИЦА — обе метки РОВНО на дедлайне (== due ⇒ нарушение по строгому <);
+            # CLOSED; PHONE/ACCOUNT; rating=4. breach(res, as_of==due≥due).
+            _ticket(
+                4,
+                created=_dt(1, 18),
+                status=TicketStatus.CLOSED,
+                type=TicketType.ACCOUNT.value,
+                channel=TicketChannel.PHONE.value,
+                first_responded_at=_dt(1, 18, 0, 15),
+                first_response_due_at=_dt(1, 18, 0, 15),
+                resolved_at=_dt(1, 19),
+                resolution_due_at=_dt(1, 19),
+                rating=4,
+            ),
+            # t5: ТОЛЬКО resolution нарушена (fr в срок, решение просрочено); RESOLVED;
+            # EMAIL/CONTRACT; без оценки. breach(res only) — изолирует resolution-клаузу.
+            _ticket(
+                5,
+                created=_dt(1, 20),
+                status=TicketStatus.RESOLVED,
+                type=TicketType.CONTRACT.value,
+                channel=TicketChannel.EMAIL.value,
+                first_responded_at=_dt(1, 20, 0, 5),
+                first_response_due_at=_dt(1, 20, 0, 15),
+                resolved_at=_dt(1, 25),
+                resolution_due_at=_dt(1, 22),
+            ),
+            # t6: обе ноги в срок; CLOSED; AI_CHAT/MAINTENANCE; rating=3. Не breach.
+            _ticket(
+                6,
+                created=_dt(1, 8),
+                status=TicketStatus.CLOSED,
+                type=TicketType.MAINTENANCE.value,
+                channel=TicketChannel.AI_CHAT.value,
+                first_responded_at=_dt(1, 8, 0, 8),
+                first_response_due_at=_dt(1, 8, 0, 15),
+                resolved_at=_dt(1, 9),
+                resolution_due_at=_dt(1, 10),
+                rating=3,
             ),
         ]
     )
@@ -135,26 +182,37 @@ def test_aggregates_exact_on_isolated_window() -> None:
         stats = await service.get_stats(_WINDOW)
 
         # Когортные объёмы (created ∈ окно).
-        assert stats.tickets.total == 3
-        assert stats.tickets.resolved == 1
-        assert stats.tickets.closed == 1
-        assert stats.tickets.by_type == {"PAYMENT": 2, "OTHER": 1}
-        assert stats.tickets.by_channel == {"AI_CHAT": 2, "EMAIL": 1}
+        assert stats.tickets.total == 6
+        assert stats.tickets.resolved == 2  # t2, t5
+        assert stats.tickets.closed == 3  # t1, t4, t6
+        assert stats.tickets.by_type == {
+            "PAYMENT": 2,
+            "OTHER": 1,
+            "ACCOUNT": 1,
+            "CONTRACT": 1,
+            "MAINTENANCE": 1,
+        }
+        assert stats.tickets.by_channel == {"AI_CHAT": 3, "EMAIL": 2, "PHONE": 1}
 
-        # SLA: compliance по завершившим ногу в окне (t1,t2); breaches по now (t2,t3).
-        assert stats.sla.first_response_compliance_pct == pytest.approx(50.0)
-        assert stats.sla.resolution_compliance_pct == pytest.approx(50.0)
-        assert stats.sla.breaches == 2
+        # SLA: compliance СТРОГО до дедлайна (t4 на границе == due ⇒ НЕ met). breaches по now.
+        # fr-знам=5 (t1,t2,t4,t5,t6), met=3 (t1,t5,t6) → 60%.
+        assert stats.sla.first_response_compliance_pct == pytest.approx(60.0)
+        # res-знам=5 (t1,t2,t4,t5,t6), met=2 (t1,t6) → 40%.
+        assert stats.sla.resolution_compliance_pct == pytest.approx(40.0)
+        # breaches: t2(res), t3(fr+res), t4(res-граница), t5(res-only) = 4.
+        assert stats.sla.breaches == 4
 
         # Производительность (wall-clock минуты).
-        assert stats.performance.avg_first_response_minutes == pytest.approx(20.0)
-        assert stats.performance.avg_resolution_minutes == pytest.approx(2160.0)
-        assert stats.performance.reopened_rate_pct == pytest.approx(100.0 / 3)
+        # fr: (10+30+15+5+8)/5 = 13.6.
+        assert stats.performance.avg_first_response_minutes == pytest.approx(13.6)
+        # res: (1440+2880+1440+7200+1440)/5 = 2880.
+        assert stats.performance.avg_resolution_minutes == pytest.approx(2880.0)
+        assert stats.performance.reopened_rate_pct == pytest.approx(100.0 / 6)  # t2 из 6
 
         # Качество и AI-чат.
-        assert stats.quality.avg_rating == pytest.approx(3.5)
-        assert stats.quality.ratings_count == 2
-        assert stats.ai_chat.escalated_count == 2
+        assert stats.quality.avg_rating == pytest.approx(3.5)  # (5+2+4+3)/4
+        assert stats.quality.ratings_count == 4
+        assert stats.ai_chat.escalated_count == 3  # t1, t3, t6 (AI_CHAT)
         assert stats.ai_chat.containment_rate_pct is None  # seam #166
 
     _in_rolled_back_session(body)

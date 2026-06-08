@@ -124,9 +124,12 @@ class AnalyticsRepository:
         """Соблюдение SLA.
 
         compliance: по заявкам, завершившим ногу В ПЕРИОДЕ, с проставленным дедлайном —
-        доля уложившихся. `resolution_due_at` УЖЕ pause-adjusted (#88, `sla_pause.py`):
-        сравниваем РОВНО с ним, БЕЗ повторного вычитания `sla_paused_seconds` (условие 3
-        ревью #165 — иначе двойной учёт пауз).
+        доля уложившихся **СТРОГО до дедлайна** (`completed_at < due_at`). Строгое `<`,
+        а не `<=`, — согласование с breach-каноном #89/#90 (`as_of >= due_at` = нарушение):
+        met ⇔ ¬breach, заявка ровно НА дедлайне считается нарушенной, не уложившейся (иначе
+        граничная заявка была бы одновременно «met» и «breached»). `resolution_due_at` УЖЕ
+        pause-adjusted (#88, `sla_pause.py`): сравниваем РОВНО с ним, БЕЗ повторного
+        вычитания `sla_paused_seconds` (условие 3 ревью #165 — иначе двойной учёт пауз).
 
         breaches: заявки, СОЗДАННЫЕ в периоде и нарушенные на момент `now` (единый
         предикат #90). **`breaches` не обязан совпадать с `(1 − compliance)·N`** — у них
@@ -145,7 +148,7 @@ class AnalyticsRepository:
                     func.coalesce(
                         func.sum(
                             case(
-                                (Ticket.first_responded_at <= Ticket.first_response_due_at, 1),
+                                (Ticket.first_responded_at < Ticket.first_response_due_at, 1),
                                 else_=0,
                             )
                         ),
@@ -165,9 +168,7 @@ class AnalyticsRepository:
                 select(
                     func.count(),
                     func.coalesce(
-                        func.sum(
-                            case((Ticket.resolved_at <= Ticket.resolution_due_at, 1), else_=0)
-                        ),
+                        func.sum(case((Ticket.resolved_at < Ticket.resolution_due_at, 1), else_=0)),
                         0,
                     ),
                 ).where(res_where)
