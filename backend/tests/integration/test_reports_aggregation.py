@@ -32,10 +32,11 @@ T = TypeVar("T")
 _WINDOW = StatsPeriod(from_date=datetime.date(2001, 1, 1), to_date=datetime.date(2001, 1, 31))
 _OP1 = uuid.UUID("aaaaaaaa-0000-0000-0000-000000000001")
 _OP2 = uuid.UUID("aaaaaaaa-0000-0000-0000-000000000002")
+_OP3 = uuid.UUID("aaaaaaaa-0000-0000-0000-000000000003")
 
 
-def _dt(month: int, day: int) -> datetime.datetime:
-    return datetime.datetime(2001, month, day, tzinfo=datetime.UTC)
+def _dt(month: int, day: int, *, year: int = 2001) -> datetime.datetime:
+    return datetime.datetime(year, month, day, tzinfo=datetime.UTC)
 
 
 def _in_rolled_back_session(body: Callable[[AsyncSession], Awaitable[T]]) -> T:
@@ -106,7 +107,8 @@ def _seed(session: AsyncSession) -> None:
                 status=TicketStatus.OPEN,
                 reopened_count=2,
             ),
-            # op1, решена ВНЕ окна (март) → НЕ в operators; создана вне окна → не в volume/rating.
+            # op1, создана и решена ВНЕ окна (фев→март) → не в operators (resolved вне окна),
+            # не в volume/rating (created вне окна).
             _ticket(
                 4,
                 created=_dt(2, 28),
@@ -114,6 +116,15 @@ def _seed(session: AsyncSession) -> None:
                 assignee_id=_OP1,
                 resolved_at=_dt(3, 1),
                 rating=5,
+            ),
+            # op3, СОЗДАНА ВНЕ окна (дек-2000), но РЕШЕНА В окне (1/10 = 14400 мин) → различает
+            # якорь: ВХОДИТ в operators при resolved-anchor (A3), ВЫПАЛА бы при created-anchor.
+            _ticket(
+                6,
+                created=_dt(12, 31, year=2000),
+                status=TicketStatus.RESOLVED,
+                assignee_id=_OP3,
+                resolved_at=_dt(1, 10),
             ),
         ]
     )
@@ -124,11 +135,17 @@ def test_operator_stats_resolved_anchor() -> None:
         _seed(session)
         await session.flush()
         stats = await AnalyticsRepository(session).operator_stats(_WINDOW)
-        # Порядок: по убыванию resolved_count → op1(2) раньше op2(1).
-        assert [(s.operator_id, s.resolved_count) for s in stats] == [(_OP1, 2), (_OP2, 1)]
+        # Порядок: resolved_count desc, tie-break operator_id asc → op1(2), затем op2(1), op3(1).
+        # op3 присутствует ТОЛЬКО потому, что anchor = resolved_at (создана вне окна) — пиннит A3.
+        assert [(s.operator_id, s.resolved_count) for s in stats] == [
+            (_OP1, 2),
+            (_OP2, 1),
+            (_OP3, 1),
+        ]
         by_op = {s.operator_id: s for s in stats}
         assert by_op[_OP1].avg_resolution_minutes == pytest.approx(2160.0)  # (1440+2880)/2
         assert by_op[_OP2].avg_resolution_minutes == pytest.approx(1440.0)
+        assert by_op[_OP3].avg_resolution_minutes == pytest.approx(14400.0)  # 10 дней
 
     _in_rolled_back_session(body)
 
