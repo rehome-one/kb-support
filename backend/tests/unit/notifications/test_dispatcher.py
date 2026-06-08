@@ -52,10 +52,14 @@ def _message(*, internal: bool = False) -> TicketMessage:
 
 
 def _settings(**over: Any) -> Settings:
+    # push/SMS по умолчанию ВЫКЛ (пустые токены) — chat/email-тесты считают точные счётчики;
+    # push/SMS-тесты включают токены явно.
     base: dict[str, Any] = {
         "smtp_host": "smtp.test",
         "smtp_from_address": "support@rehome.one",
         "kb_search_api_token": "tok",
+        "sms_api_token": "",
+        "push_api_token": "",
     }
     base.update(over)
     return Settings(**base)
@@ -169,6 +173,43 @@ def test_schedule_status_off_without_config() -> None:
 def test_status_label_known_and_fallback() -> None:
     assert status_label(TicketStatus.RESOLVED.value) == "Решена"
     assert status_label("UNKNOWN") == "UNKNOWN"
+
+
+# --- push/SMS seam'ы в веере (#150) ---
+
+
+def test_notify_message_includes_push_sms_when_enabled() -> None:
+    bg = BackgroundTasks()
+    # EMAIL-заявка: email(1) + push(1) + sms(1) = 3 (chat не для EMAIL).
+    notify_message(
+        bg,
+        _ticket(channel=TicketChannel.EMAIL.value),
+        _message(),
+        _settings(push_api_token="p", sms_api_token="s"),
+    )
+    assert len(bg.tasks) == 3
+
+
+def test_notify_message_internal_note_no_push_sms() -> None:
+    # NFR-1.3 (security): внутренняя заметка НЕ уходит ни push, ни SMS (как и chat/email).
+    bg = BackgroundTasks()
+    notify_message(
+        bg, _ticket(), _message(internal=True), _settings(push_api_token="p", sms_api_token="s")
+    )
+    assert bg.tasks == []
+
+
+def test_status_notification_includes_push_sms_when_enabled() -> None:
+    bg = BackgroundTasks()
+    t = _ticket(status=TicketStatus.RESOLVED.value, channel=TicketChannel.EMAIL.value)
+    # email(1) + push(1) + sms(1) = 3.
+    schedule_status_notification(
+        bg,
+        t,
+        StatusNotice(TicketStatus.RESOLVED.value),
+        _settings(push_api_token="p", sms_api_token="s"),
+    )
+    assert len(bg.tasks) == 3
 
 
 # --- dispatch_status_to_chat (фоновая доставка, без сети) ---
