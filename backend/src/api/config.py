@@ -290,6 +290,15 @@ class Settings(BaseSettings):
         description="Токен push-провайдера. ПУСТО → push-канал выключен (seam, #161).",
     )
 
+    # --- Аналитика (E8-1, #165, ADR-0011 Решение 2). Агрегаты считаются по своей БД
+    # on-the-fly + cache-aside с TTL (Redis/InMemory из #70). Недоступность кэша не
+    # валит запрос — деградация на прямой расчёт. ---
+    analytics_cache_ttl_seconds: int = Field(
+        default=60,
+        ge=1,
+        description="TTL кэша сводных метрик аналитики (сек). Толерантна к задержке свежести.",
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
