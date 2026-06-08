@@ -16,6 +16,7 @@ from api.tickets.models import Ticket
 
 _BLOCK = "notifications"
 _LAST = "last_status_notified"
+_CTA = "rating_cta_sent"
 
 
 def _block(ticket: Ticket) -> dict[str, Any]:
@@ -52,3 +53,17 @@ def clear_status_notified(ticket: Ticket) -> None:
     if _LAST in block:
         block.pop(_LAST)
         _write(ticket, block)
+
+
+def rating_cta_sent(ticket: Ticket) -> bool:
+    """Был ли уже отправлен email-CTA «оцени заявку» (FR-8.1, #184) — дедуп."""
+    return _block(ticket).get(_CTA) is True
+
+
+def set_rating_cta_sent(ticket: Ticket) -> None:
+    """Пометить, что CTA отправлен (через общий блок — сосуществует с last_status_notified;
+    read-modify-reassign, чтобы не перетереть статус-маркер в той же транзакции). НЕ
+    сбрасывается при reopen — один CTA на заявку (ADR-0012 D3)."""
+    block = _block(ticket)
+    block[_CTA] = True
+    _write(ticket, block)

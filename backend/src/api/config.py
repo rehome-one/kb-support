@@ -297,6 +297,13 @@ class Settings(BaseSettings):
         default="",
         description="Email супервайзера для уведомления о низкой оценке (1-2). ПУСТО → выключено.",
     )
+    # FR-8.1 (#184): email-CTA «оцени заявку» на закрытии. Ссылка на страницу оценки в
+    # ЛК rehome.one (ADR-0012 D1, UI вне репо), шаблон с плейсхолдером {number}. ПУСТО
+    # (или пустой smtp_host) → CTA не шлётся (config-gated seam D3).
+    rating_url_template: str = Field(
+        default="",
+        description="URL-шаблон страницы оценки в ЛК ({number}). ПУСТО → email-CTA выключен.",
+    )
 
     # --- Аналитика (E8-1, #165, ADR-0011 Решение 2). Агрегаты считаются по своей БД
     # on-the-fly + cache-aside с TTL (Redis/InMemory из #70). Недоступность кэша не

@@ -344,3 +344,98 @@ def test_low_rating_best_effort_does_not_raise() -> None:
 
     # Не бросает наружу (исключение изолировано внутри notify_low_rating).
     dispatcher.notify_low_rating(_BoomBackground(), _rated_ticket(rating=1), _low_settings())
+
+
+# --- prepare_rating_cta / schedule_rating_cta (FR-8.1, #184) ---
+
+
+def _cta_settings(**over: Any) -> Settings:
+    base: dict[str, Any] = {
+        "smtp_host": "smtp.test",
+        "smtp_from_address": "support@rehome.one",
+        "rating_url_template": "https://lk.rehome.one/tickets/{number}/rate",
+    }
+    base.update(over)
+    return Settings(**base)
+
+
+def _closeable(*, rating: int | None = None) -> Ticket:
+    return Ticket(
+        id=uuid.uuid4(),
+        number="RH-2026-00042",
+        subject="Оплата",
+        status=TicketStatus.CLOSED.value,
+        channel=TicketChannel.EMAIL.value,
+        requester_id=_REQUESTER,
+        rating=rating,
+        custom_fields={"email_from": "req@example.com"},
+    )
+
+
+def test_prepare_cta_on_close_unrated_sets_marker() -> None:
+    ticket = _closeable()
+    assert dispatcher.prepare_rating_cta(ticket, TicketStatus.RESOLVED.value) is True
+    # маркер персистится реассайном
+    assert ticket.custom_fields["notifications"]["rating_cta_sent"] is True
+
+
+def test_prepare_cta_not_closed_returns_false() -> None:
+    ticket = _closeable()
+    ticket.status = TicketStatus.RESOLVED.value
+    assert dispatcher.prepare_rating_cta(ticket, TicketStatus.OPEN.value) is False
+
+
+def test_prepare_cta_already_closed_no_resend() -> None:
+    ticket = _closeable()
+    assert dispatcher.prepare_rating_cta(ticket, TicketStatus.CLOSED.value) is False  # old==CLOSED
+
+
+def test_prepare_cta_already_rated_returns_false() -> None:
+    ticket = _closeable(rating=5)
+    assert dispatcher.prepare_rating_cta(ticket, TicketStatus.RESOLVED.value) is False
+
+
+def test_prepare_cta_dedup_second_close_no_resend() -> None:
+    ticket = _closeable()
+    assert dispatcher.prepare_rating_cta(ticket, TicketStatus.RESOLVED.value) is True
+    # повторный «close» (после reopen→close) — маркер стоит → второго CTA нет
+    assert dispatcher.prepare_rating_cta(ticket, TicketStatus.RESOLVED.value) is False
+
+
+def test_cta_marker_coexists_with_status_marker() -> None:
+    # Условие 1 ревью: оба маркера в одном блоке custom_fields после close (одна транзакция).
+    ticket = _closeable()
+    from api.notifications.dedup import set_status_notified
+
+    set_status_notified(ticket, TicketStatus.CLOSED.value)
+    dispatcher.prepare_rating_cta(ticket, TicketStatus.RESOLVED.value)
+    block = ticket.custom_fields["notifications"]
+    assert block["last_status_notified"] == TicketStatus.CLOSED.value
+    assert block["rating_cta_sent"] is True
+
+
+def test_schedule_cta_email_to_requester_with_link() -> None:
+    bg = BackgroundTasks()
+    dispatcher.schedule_rating_cta(bg, _closeable(), _cta_settings())
+    assert len(bg.tasks) == 1
+    email = cast(OutboundEmail, bg.tasks[0].args[0])
+    assert email.to_addr == "req@example.com"  # адресат — заявитель
+    assert "RH-2026-00042" in email.body and "lk.rehome.one" in email.body
+
+
+def test_schedule_cta_config_gated() -> None:
+    bg = BackgroundTasks()
+    dispatcher.schedule_rating_cta(bg, _closeable(), _cta_settings(rating_url_template=""))
+    assert len(bg.tasks) == 0
+    bg2 = BackgroundTasks()
+    dispatcher.schedule_rating_cta(bg2, _closeable(), _cta_settings(smtp_host=""))
+    assert len(bg2.tasks) == 0
+
+
+def test_schedule_cta_no_recipient_skips() -> None:
+    # не-EMAIL канал / нет email_from → адрес неизвестен → задача не планируется
+    ticket = _closeable()
+    ticket.custom_fields = {}
+    bg = BackgroundTasks()
+    dispatcher.schedule_rating_cta(bg, ticket, _cta_settings())
+    assert len(bg.tasks) == 0

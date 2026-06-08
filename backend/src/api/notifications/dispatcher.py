@@ -33,12 +33,14 @@ from api.notifications.channels import maybe_schedule_push, maybe_schedule_sms
 from api.notifications.dedup import (
     clear_status_notified,
     last_status_notified,
+    rating_cta_sent,
+    set_rating_cta_sent,
     set_status_notified,
 )
 from api.notifications.labels import NOTIFIED_STATUSES, status_label
 from api.observability.logging import get_logger
 from api.tickets.chat_return import maybe_schedule_return
-from api.tickets.enums import TicketChannel
+from api.tickets.enums import TicketChannel, TicketStatus
 from api.tickets.messages import TicketMessage, is_public_operator_reply
 from api.tickets.models import Ticket
 
@@ -78,6 +80,46 @@ def notify_low_rating(background: BackgroundTasks, ticket: Ticket, settings: Set
         background.add_task(dispatch_email, email, settings)
     except Exception:  # изоляция — уведомление не должно ронять rate (best-effort, #72)
         _logger.warning("low-rating notify failed to schedule ticket=%s", ticket.number)
+
+
+def prepare_rating_cta(ticket: Ticket, old_status: str) -> bool:
+    """FR-8.1 (#184, ADR-0012 D3): решить, слать ли email-CTA «оцени заявку», и выставить
+    дедуп-маркер В ТЕКУЩЕЙ транзакции (как `prepare_status_notification`). Возвращает True,
+    если нужно запланировать CTA (после commit). Условия: переход именно В CLOSED
+    (old≠CLOSED & new==CLOSED), оценка ещё НЕ выставлена (`rating is None`), CTA ещё не
+    слался (дедуп). Маркер пишется реассайном, сосуществует с `last_status_notified`."""
+    if ticket.status != TicketStatus.CLOSED.value or old_status == TicketStatus.CLOSED.value:
+        return False
+    if ticket.rating is not None:  # уже оценил — CTA не нужен
+        return False
+    if rating_cta_sent(ticket):  # дедуп: один CTA на заявку (не сбрасывается reopen'ом)
+        return False
+    set_rating_cta_sent(ticket)
+    return True
+
+
+def schedule_rating_cta(background: BackgroundTasks, ticket: Ticket, settings: Settings) -> None:
+    """Запланировать email-CTA заявителю (fire-after, best-effort). Config-gated: `smtp_host`
+    И `rating_url_template` И известный адрес заявителя (`email_recipient`, EMAIL-канал).
+    ФЗ-152 (D6): только номер + ссылка из config-шаблона, без ПДн/комментария."""
+    if not settings.smtp_host or not settings.rating_url_template:
+        return
+    recipient = email_recipient(ticket)
+    if not recipient:  # адрес заявителя неизвестен (не-EMAIL канал) → ЛК нативно/#77
+        return
+    try:
+        link = settings.rating_url_template.format(number=ticket.number)
+        email = OutboundEmail(
+            to_addr=recipient,
+            subject=f"Оцените, как мы решили вашу заявку [{ticket.number}]",
+            body=f"Ваша заявка {ticket.number} закрыта. Оцените качество обслуживания:\n{link}",
+            in_reply_to=None,
+            ticket_number=ticket.number,
+            message_id=uuid.uuid4(),
+        )
+        background.add_task(dispatch_email, email, settings)
+    except Exception:  # изоляция — CTA не должен ронять смену статуса (best-effort)
+        _logger.warning("rating CTA failed to schedule ticket=%s", ticket.number)
 
 
 def notify_message(

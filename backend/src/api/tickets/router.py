@@ -31,7 +31,9 @@ from api.errors import ProblemException
 from api.notifications.dispatcher import (
     notify_low_rating,
     notify_message,
+    prepare_rating_cta,
     prepare_status_notification,
+    schedule_rating_cta,
     schedule_status_notification,
 )
 from api.tickets.actions import TicketActionService
@@ -390,10 +392,13 @@ async def update_ticket(
     updated = await repo.apply_update(ticket, payload, principal)
     # E7-8 (#149): решение об уведомлении + дедуп-маркер пишутся В ЭТОЙ транзакции.
     notice = prepare_status_notification(updated, old_status, principal.user_id)
+    cta = prepare_rating_cta(updated, old_status)  # FR-8.1: CTA на CLOSED через PATCH (#184)
     await session.commit()
     await session.refresh(updated)
     if notice is not None:  # планируем веер каналов после commit (fire-after)
         schedule_status_notification(background, updated, notice, get_settings())
+    if cta:
+        schedule_rating_cta(background, updated, get_settings())
     return TicketEnvelope(
         data=TicketRead.model_validate(updated),
         request_id=_resolve_request_id(x_request_id),
@@ -640,10 +645,13 @@ async def close_ticket(
     old_status = ticket.status
     await TicketActionService(session).close(ticket, principal.user_id)
     notice = prepare_status_notification(ticket, old_status, principal.user_id)
+    cta = prepare_rating_cta(ticket, old_status)  # FR-8.1: CTA «оцени заявку» (#184)
     await session.commit()
     await session.refresh(ticket)
     if notice is not None:
         schedule_status_notification(background, ticket, notice, get_settings())
+    if cta:
+        schedule_rating_cta(background, ticket, get_settings())
     return _ticket_envelope(ticket, x_request_id)
 
 
