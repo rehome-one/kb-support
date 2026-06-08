@@ -830,6 +830,50 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/tickets/from-email:
+    post:
+      tags:
+      - Tickets
+      summary: Принять входящее письмо (email-шлюз)
+      description: >-
+        Приём входящего email от шлюза в контуре РФ (FR-1.2, ADR-0010 Решения 1/3/4).
+        m2m-доступ (BearerAuth), только kind=SERVICE — отправитель НЕ доверяется и
+        резолвится сервером из письма (anti-spoofing). Тело — base64-кодированное
+        сырое RFC822-письмо (provisional contract). Поведение: при номере активной
+        заявки в теме письмо добавляется ответом, иначе создаётся новая заявка
+        channel=EMAIL; повторная доставка дедуплицируется по Message-ID. Во всех
+        исходах (создано / добавлено к существующей / дедуп) возвращается 201 со
+        ссылкой на заявку. Malformed-письмо принимается (флаг разбора в заявке),
+        битый base64 → 400, превышение размера тела → 422.
+      operationId: createTicketFromEmail
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailIngest'
+      responses:
+        '201':
+          description: Заявка создана, дополнена или дедуплицирована (ссылка на заявку)
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/support/canned-responses:
     get:
       tags:
@@ -2345,6 +2389,19 @@ components:
         booking_id:
           type: string
           format: uuid
+    EmailIngest:
+      type: object
+      description: >-
+        Приём входящего письма (E7-3). raw_message — base64-кодированное сырое
+        RFC822-письмо (provisional contract: JSON-safe носитель байтов).
+      additionalProperties: false
+      required:
+      - raw_message
+      properties:
+        raw_message:
+          type: string
+          minLength: 1
+          description: base64-кодированное сырое RFC822-письмо
     CannedResponse:
       type: object
       required:
