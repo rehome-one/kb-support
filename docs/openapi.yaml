@@ -1459,7 +1459,12 @@ paths:
       tags:
       - Analytics
       summary: Отчёт
-      description: 'Готовые отчёты: объём по типам/каналам, SLA, удовлетворённость, повторные обращения.'
+      description: >-
+        Готовые отчёты: объём по типам/каналам, SLA, удовлетворённость, повторные
+        обращения, эффективность операторов. scope=staff_supervisor (оператор → 403).
+        Период — UTC, from/to включительно; без параметров — последние 30 дней. volume
+        агрегирует за окно запроса (time-series разбивка — отдельный follow-up). format=json
+        отдаёт типизированный отчёт (по report-дискриминатору), format=csv — text/csv.
       operationId: getReport
       parameters:
       - name: type
@@ -1497,13 +1502,34 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      oneOf:
+                      - $ref: '#/components/schemas/VolumeReport'
+                      - $ref: '#/components/schemas/SlaReport'
+                      - $ref: '#/components/schemas/SatisfactionReport'
+                      - $ref: '#/components/schemas/ReopensReport'
+                      - $ref: '#/components/schemas/OperatorsReport'
+                      discriminator:
+                        propertyName: report
+                        mapping:
+                          volume: '#/components/schemas/VolumeReport'
+                          sla: '#/components/schemas/SlaReport'
+                          satisfaction: '#/components/schemas/SatisfactionReport'
+                          reopens: '#/components/schemas/ReopensReport'
+                          operators: '#/components/schemas/OperatorsReport'
             text/csv:
               schema:
                 type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/support/webhooks:
     get:
       tags:
@@ -3073,6 +3099,138 @@ components:
             degraded:
               type: boolean
               description: containment недоступен (kb-search seam выключен/деградация)
+    ReportPeriod:
+      type: object
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+    VolumeReport:
+      type: object
+      description: Объём заявок по типам и каналам за период (long-format строки).
+      required:
+      - report
+      properties:
+        report:
+          type: string
+          enum:
+          - volume
+        period:
+          $ref: '#/components/schemas/ReportPeriod'
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              dimension:
+                type: string
+                description: 'Измерение: type | channel'
+              key:
+                type: string
+              count:
+                type: integer
+    SlaReport:
+      type: object
+      description: Соблюдение SLA за период (одна сводная строка).
+      required:
+      - report
+      properties:
+        report:
+          type: string
+          enum:
+          - sla
+        period:
+          $ref: '#/components/schemas/ReportPeriod'
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              first_response_compliance_pct:
+                type:
+                - number
+                - 'null'
+              resolution_compliance_pct:
+                type:
+                - number
+                - 'null'
+              breaches:
+                type: integer
+    SatisfactionReport:
+      type: object
+      description: Распределение оценок (1..5) за период.
+      required:
+      - report
+      properties:
+        report:
+          type: string
+          enum:
+          - satisfaction
+        period:
+          $ref: '#/components/schemas/ReportPeriod'
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              rating:
+                type: integer
+              count:
+                type: integer
+    ReopensReport:
+      type: object
+      description: Повторные обращения за период (одна сводная строка).
+      required:
+      - report
+      properties:
+        report:
+          type: string
+          enum:
+          - reopens
+        period:
+          $ref: '#/components/schemas/ReportPeriod'
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              total:
+                type: integer
+              reopened:
+                type: integer
+              reopened_rate_pct:
+                type:
+                - number
+                - 'null'
+    OperatorsReport:
+      type: object
+      description: Эффективность операторов (resolved-anchor) за период.
+      required:
+      - report
+      properties:
+        report:
+          type: string
+          enum:
+          - operators
+        period:
+          $ref: '#/components/schemas/ReportPeriod'
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              operator_id:
+                type: string
+                format: uuid
+              resolved_count:
+                type: integer
+              avg_resolution_minutes:
+                type:
+                - number
+                - 'null'
     TicketCaseDetails:
       type: object
       description: Детали претензионного обращения (1:1 с Ticket, раздел 3.11 ТЗ)

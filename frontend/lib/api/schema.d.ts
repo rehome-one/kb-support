@@ -599,7 +599,7 @@ export interface paths {
         };
         /**
          * Отчёт
-         * @description Готовые отчёты: объём по типам/каналам, SLA, удовлетворённость, повторные обращения.
+         * @description Готовые отчёты: объём по типам/каналам, SLA, удовлетворённость, повторные обращения, эффективность операторов. scope=staff_supervisor (оператор → 403). Период — UTC, from/to включительно; без параметров — последние 30 дней. volume агрегирует за окно запроса (time-series разбивка — отдельный follow-up). format=json отдаёт типизированный отчёт (по report-дискриминатору), format=csv — text/csv.
          */
         get: operations["getReport"];
         put?: never;
@@ -1325,6 +1325,83 @@ export interface components {
                 /** @description containment недоступен (kb-search seam выключен/деградация) */
                 degraded?: boolean;
             };
+        };
+        ReportPeriod: {
+            /** Format: date */
+            from?: string;
+            /** Format: date */
+            to?: string;
+        };
+        /** @description Объём заявок по типам и каналам за период (long-format строки). */
+        VolumeReport: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            report: "volume";
+            period?: components["schemas"]["ReportPeriod"];
+            rows?: {
+                /** @description Измерение: type | channel */
+                dimension?: string;
+                key?: string;
+                count?: number;
+            }[];
+        };
+        /** @description Соблюдение SLA за период (одна сводная строка). */
+        SlaReport: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            report: "sla";
+            period?: components["schemas"]["ReportPeriod"];
+            rows?: {
+                first_response_compliance_pct?: number | null;
+                resolution_compliance_pct?: number | null;
+                breaches?: number;
+            }[];
+        };
+        /** @description Распределение оценок (1..5) за период. */
+        SatisfactionReport: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            report: "satisfaction";
+            period?: components["schemas"]["ReportPeriod"];
+            rows?: {
+                rating?: number;
+                count?: number;
+            }[];
+        };
+        /** @description Повторные обращения за период (одна сводная строка). */
+        ReopensReport: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            report: "reopens";
+            period?: components["schemas"]["ReportPeriod"];
+            rows?: {
+                total?: number;
+                reopened?: number;
+                reopened_rate_pct?: number | null;
+            }[];
+        };
+        /** @description Эффективность операторов (resolved-anchor) за период. */
+        OperatorsReport: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            report: "operators";
+            period?: components["schemas"]["ReportPeriod"];
+            rows?: {
+                /** Format: uuid */
+                operator_id?: string;
+                resolved_count?: number;
+                avg_resolution_minutes?: number | null;
+            }[];
         };
         /** @description Детали претензионного обращения (1:1 с Ticket, раздел 3.11 ТЗ) */
         TicketCaseDetails: {
@@ -2661,13 +2738,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["VolumeReport"] | components["schemas"]["SlaReport"] | components["schemas"]["SatisfactionReport"] | components["schemas"]["ReopensReport"] | components["schemas"]["OperatorsReport"];
                     };
                     "text/csv": string;
                 };
             };
+            401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     listWebhooks: {
