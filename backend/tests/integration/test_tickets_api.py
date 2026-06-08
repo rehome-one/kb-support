@@ -96,6 +96,23 @@ def _set_team(ticket_id: str, team_value: str) -> None:
     asyncio.run(_inner())
 
 
+def _set_case_state(ticket_id: str, case_state: str) -> None:
+    """Выставить case_state заявке напрямую в БД (подготовка стартовой стадии, E10-2)."""
+
+    async def _inner() -> None:
+        engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("UPDATE tickets SET case_state = :s WHERE id = :id"),
+                    {"s": case_state, "id": uuid.UUID(ticket_id)},
+                )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_inner())
+
+
 def _set_status(ticket_id: str, status_value: str) -> None:
     """Выставить статус заявке напрямую в БД (подготовка стартового состояния)."""
 
@@ -1300,3 +1317,79 @@ def test_requester_context_populated_from_platform(client: TestClient) -> None:
     assert data["user"] is not None
     assert data["user"]["id"] == requester_id
     assert data["user"]["display_name"] == "Контекст Тест"
+
+
+# --- case_state переходы + «4 глаза» (E10-2/E10-4 #192/#194) ---
+
+
+def test_case_state_transition_records_history(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "CLAIM_SUBMITTED")
+    resp = _action(client, ticket_id, "case-state", case_state="DOCS_PENDING", note="нужны фото")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["case_state"] == "DOCS_PENDING"
+    assert "case_state_changed" in _history_actions(client, ticket_id)
+
+
+def test_case_state_forbidden_transition_422(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "CLAIM_SUBMITTED")
+    # CLAIM_SUBMITTED → PAID запрещён машиной.
+    assert _action(client, ticket_id, "case-state", case_state="PAID").status_code == 422
+
+
+def test_case_state_none_is_422(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]  # не претензионная, case_state=None
+    assert _action(client, ticket_id, "case-state", case_state="DOCS_PENDING").status_code == 422
+
+
+def test_case_state_requester_forbidden_403(client: TestClient) -> None:
+    # Заявитель видит СВОЮ заявку (проходит visibility) → упирается в operator-гейт (403).
+    requester = uuid.uuid4()
+    _use(Principal(user_id=requester, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "CLAIM_SUBMITTED")
+    assert _action(client, ticket_id, "case-state", case_state="DOCS_PENDING").status_code == 403
+
+
+def test_case_state_unknown_ticket_404(client: TestClient) -> None:
+    _use(_operator())
+    resp = _action(client, str(uuid.uuid4()), "case-state", case_state="DOCS_PENDING")
+    assert resp.status_code == 404
+
+
+def test_payout_four_eyes_requires_two_distinct_operators(client: TestClient) -> None:
+    op_a = _operator()
+    op_b = _operator()  # другой user_id
+    _use(op_a)
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_team(ticket_id, "support")  # обе операторы в команде SUPPORT → оба видят заявку
+    _set_case_state(ticket_id, "PAYOUT_PENDING")
+
+    # Первый аппрув (op_a): case_state остаётся PAYOUT_PENDING, фиксируется первый подтверждающий.
+    r1 = _action(client, ticket_id, "case-state", case_state="PAID")
+    assert r1.status_code == 200, r1.text
+    assert r1.json()["data"]["case_state"] == "PAYOUT_PENDING"
+    assert "payout_approval_recorded" in _history_actions(client, ticket_id)
+
+    # Тот же оператор повторно → 409 (нужен ДРУГОЙ сотрудник).
+    assert _action(client, ticket_id, "case-state", case_state="PAID").status_code == 409
+
+    # Второй, ДРУГОЙ оператор → переход в PAID.
+    _use(op_b)
+    r2 = _action(client, ticket_id, "case-state", case_state="PAID")
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["data"]["case_state"] == "PAID"
+
+
+def test_case_state_noop_no_history_growth(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "UNDER_REVIEW")
+    before = len(_history_actions(client, ticket_id))
+    resp = _action(client, ticket_id, "case-state", case_state="UNDER_REVIEW")  # no-op
+    assert resp.status_code == 200
+    assert len(_history_actions(client, ticket_id)) == before  # журнал не вырос
