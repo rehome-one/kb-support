@@ -29,6 +29,7 @@ from api.email.ingestion import ingest_email
 from api.email.parser import parse_email
 from api.errors import ProblemException
 from api.notifications.dispatcher import (
+    notify_low_rating,
     notify_message,
     prepare_status_notification,
     schedule_status_notification,
@@ -674,6 +675,7 @@ async def reopen_ticket(
 async def rate_ticket(
     ticket_id: uuid.UUID,
     payload: RateInput,
+    background: BackgroundTasks,
     principal: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_session),
     x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
@@ -689,4 +691,6 @@ async def rate_ticket(
     )
     await session.commit()
     await session.refresh(ticket)
+    # FR-8.2: низкую оценку (1-2) — супервайзеру fire-after (config-gated seam, #183).
+    notify_low_rating(background, ticket, get_settings())
     return _ticket_envelope(ticket, x_request_id)

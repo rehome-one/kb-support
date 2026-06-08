@@ -44,6 +44,41 @@ from api.tickets.models import Ticket
 
 _logger = get_logger("notifications")
 
+# Низкая оценка (FR-8.2) — балл ≤ этого порога (ADR-0012 D4).
+_LOW_RATING_MAX = 2
+
+
+def notify_low_rating(background: BackgroundTasks, ticket: Ticket, settings: Settings) -> None:
+    """FR-8.2: уведомить супервайзера о низкой оценке (1-2) — fire-after, best-effort.
+
+    Config-gated seam (ADR-0012 D2): адресат — `settings.low_rating_notify_email` (НЕ
+    заявитель), gate по нему И `smtp_host`. Балл ≤ `_LOW_RATING_MAX`. Сбой планирования
+    изолирован — НЕ роняет `rate`. ФЗ-152 (D6): `rating_comment` в лог не пишем; в теле
+    письма супервайзеру (внутренний контур) допустим.
+    """
+    rating = ticket.rating
+    if rating is None or rating > _LOW_RATING_MAX:
+        return
+    recipient = settings.low_rating_notify_email
+    if not recipient or not settings.smtp_host:  # seam инертен до ops
+        return
+    try:
+        comment = ticket.rating_comment
+        body = f"Заявка {ticket.number} получила низкую оценку: {rating}/5."
+        if comment:
+            body += f"\n\nКомментарий заявителя:\n{comment}"
+        email = OutboundEmail(
+            to_addr=recipient,
+            subject=f"Низкая оценка [{ticket.number}]: {rating}/5",
+            body=body,
+            in_reply_to=None,
+            ticket_number=ticket.number,
+            message_id=uuid.uuid4(),  # у уведомления нет сообщения — id для лог-корреляции
+        )
+        background.add_task(dispatch_email, email, settings)
+    except Exception:  # изоляция — уведомление не должно ронять rate (best-effort, #72)
+        _logger.warning("low-rating notify failed to schedule ticket=%s", ticket.number)
+
 
 def notify_message(
     background: BackgroundTasks, ticket: Ticket, message: TicketMessage, settings: Settings
