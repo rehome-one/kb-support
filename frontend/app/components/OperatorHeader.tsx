@@ -25,6 +25,9 @@ export async function OperatorHeader() {
           <Link href="/dashboard" className="text-gray-600 hover:text-gray-900">
             Панель
           </Link>
+          <Link href="/reports" className="text-gray-600 hover:text-gray-900">
+            Отчёты
+          </Link>
         </nav>
       </div>
       <div className="flex items-center gap-3 text-sm">
