@@ -25,6 +25,7 @@ from api.clients.platform import PlatformClient
 from api.config import get_settings
 from api.db import get_session
 from api.email.ingestion import ingest_email
+from api.email.outbound import maybe_schedule_email
 from api.email.parser import parse_email
 from api.errors import ProblemException
 from api.tickets.actions import TicketActionService
@@ -538,6 +539,9 @@ async def create_message(
     # chat-session фоном (NFR-1.3 gate + плоский DTO извлекается здесь, пока жива
     # сессия; внутренние заметки НЕ уходят). Выключено без kb_search_api_token.
     maybe_schedule_return(background, ticket, message, get_settings())
+    # E7-5 (#147): публичный ответ оператора по EMAIL-заявке уходит письмом фоном
+    # (NFR-1.3 gate + плоский DTO; internal-заметки НЕ отправляются). Выключено без smtp_host.
+    maybe_schedule_email(background, ticket, message, get_settings())
     return TicketMessageEnvelope(
         data=TicketMessageRead.model_validate(message),
         request_id=_resolve_request_id(x_request_id),
