@@ -29,6 +29,7 @@ from api.auth.system_actors import EMAIL_SENDER_ACTOR_ID
 from api.clients.errors import ExternalServiceError
 from api.clients.kb_files import KbFilesClient
 from api.clients.platform import PlatformClient
+from api.email import metrics
 from api.email.parser import ParsedAttachment, ParsedEmail
 from api.observability.logging import get_logger
 from api.tickets.messages import TicketMessage
@@ -137,6 +138,7 @@ async def _upload_attachments(
                 filename=att.filename, content_type=att.content_type, content=att.content
             )
             file_ids.append(stored.id)
+            metrics.record_attachment_size(att.size)  # #151: размер принятого вложения
         except ExternalServiceError:
             # Тело/имя не логируем (ФЗ-152) — только факт сбоя.
             failed += 1

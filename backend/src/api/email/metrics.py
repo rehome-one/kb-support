@@ -7,7 +7,10 @@
 
 from __future__ import annotations
 
-from prometheus_client import Counter
+from prometheus_client import Counter, Histogram
+
+# Геометрический ряд байтов (1КБ…10МБ) — распределение размеров принятых вложений.
+_ATTACHMENT_SIZE_BUCKETS = (1024, 8192, 65536, 262144, 1048576, 5242880, 10485760)
 
 EMAIL_FETCHED = Counter(
     "email_fetched_total",
@@ -26,6 +29,17 @@ EMAIL_INGEST_FAILURES = Counter(
     "email_ingest_failures_total",
     "Сбоев приёма письма (ingest/commit) — письмо НЕ помечено обработанным, ретрай",
 )
+EMAIL_ATTACHMENT_SIZE = Histogram(
+    "email_attachment_size_bytes",
+    "Размер ПРИНЯТОГО вложения входящего email (только успешно загруженные в kb-files; "
+    "oversized отсеяны парсером до приёма и учитываются отдельно — НЕ в этой гистограмме)",
+    buckets=_ATTACHMENT_SIZE_BUCKETS,
+)
+
+
+def record_attachment_size(size: int) -> None:
+    """Учесть размер принятого (успешно загруженного) вложения. Только число — без ПДн."""
+    EMAIL_ATTACHMENT_SIZE.observe(size)
 
 
 def record_fetched(count: int) -> None:
