@@ -56,9 +56,16 @@ export type CannedListResponse = OkJson<"listCannedResponses", 200>;
 export type CannedRenderResponse = OkJson<"renderCannedResponse", 200>;
 export type MessageResponse = OkJson<"createMessage", 201>;
 export type SupportStatsResponse = OkJson<"getSupportStats", 200>;
+export type ReportResponse = OkJson<"getReport", 200>;
+export type ReportType = NonNullable<operations["getReport"]["parameters"]["path"]>["type"];
 export type ListTicketsQuery = NonNullable<operations["listTickets"]["parameters"]["query"]>;
 export type ListMessagesQuery = NonNullable<operations["listMessages"]["parameters"]["query"]>;
 export type SupportStatsQuery = NonNullable<operations["getSupportStats"]["parameters"]["query"]>;
+/** Период отчёта (без `format` — его задаёт хелпер: json-просмотр vs csv-выгрузка). */
+export type ReportQuery = Pick<
+  NonNullable<operations["getReport"]["parameters"]["query"]>,
+  "from" | "to"
+>;
 export type TicketUpdateInput = BodyJson<"updateTicket">;
 export type MessageCreateInput = BodyJson<"createMessage">;
 export type AssignInput = BodyJson<"assignTicket">;
@@ -212,6 +219,40 @@ export function getSupportStats(
   deps?: ApiFetchDeps,
 ): Promise<SupportStatsResponse> {
   return request<SupportStatsResponse>(STATS, "GET", { query, deps });
+}
+
+const REPORTS = "/api/v1/support/reports";
+const reportPath = (type: ReportType): string => `${REPORTS}/${encodeURIComponent(type)}`;
+
+export function getReport(
+  type: ReportType,
+  query?: ReportQuery,
+  deps?: ApiFetchDeps,
+): Promise<ReportResponse> {
+  // json-просмотр: format не шлём (дефолт контракта — типизированный отчёт).
+  return request<ReportResponse>(reportPath(type), "GET", { query, deps });
+}
+
+/**
+ * Сырая CSV-выгрузка отчёта (FR-7.2). НЕ через `request<T>` — тот json-only
+ * (Accept/парсинг). Зовётся ТОЛЬКО из server action (токен на сервере); ошибки
+ * маппятся той же `toApiError`, что и `request<T>` (единый путь, тот же модуль).
+ */
+export async function getReportCsv(
+  type: ReportType,
+  query?: ReportQuery,
+  deps?: ApiFetchDeps,
+): Promise<string> {
+  const headers = new Headers({
+    Accept: "text/csv",
+    "X-Request-Id": crypto.randomUUID(),
+  });
+  const path = `${reportPath(type)}${buildQuery({ ...query, format: "csv" })}`;
+  const response = await apiFetch(path, { method: "GET", headers }, deps);
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+  return response.text();
 }
 
 const CANNED = "/api/v1/support/canned-responses";
