@@ -44,8 +44,9 @@ class OutboundEmail:
     message_id: uuid.UUID
 
 
-def _recipient(ticket: Ticket) -> str:
-    """Адрес заявителя из метаданных входящего письма (#145). Пусто → отправки нет."""
+def email_recipient(ticket: Ticket) -> str:
+    """Адрес заявителя из метаданных входящего письма (#145). Пусто → отправки нет.
+    Публичный — переиспользуется диспетчером уведомлений (#149)."""
     cf = ticket.custom_fields or {}
     addr = cf.get("email_from")
     return addr if isinstance(addr, str) else ""
@@ -57,7 +58,7 @@ def should_send_email(ticket: Ticket, message: TicketMessage) -> bool:
     return (
         is_public_operator_reply(message)
         and ticket.channel == TicketChannel.EMAIL.value
-        and bool(_recipient(ticket))
+        and bool(email_recipient(ticket))
     )
 
 
@@ -69,7 +70,7 @@ def build_outbound_email(ticket: Ticket, message: TicketMessage) -> OutboundEmai
     cf = ticket.custom_fields or {}
     mid = cf.get("email_message_id")
     return OutboundEmail(
-        to_addr=_recipient(ticket),
+        to_addr=email_recipient(ticket),
         subject=f"Re: {ticket.subject} [{ticket.number}]",
         body=message.body,
         in_reply_to=mid if isinstance(mid, str) and mid else None,

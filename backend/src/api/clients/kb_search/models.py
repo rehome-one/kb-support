@@ -33,6 +33,20 @@ class OperatorReply:
 
 
 @dataclass(frozen=True)
+class StatusNotification:
+    """Уведомление заявителя о смене статуса заявки в chat-session (E7-8, #149).
+
+    Выделенный путь (НЕ operator-reply): у статуса нет message_id, поэтому отдельный
+    провизорный контракт, не маскируется под ответ оператора. Только простые значения,
+    без ПДн (номер/статус/лейбл)."""
+
+    chat_session_id: uuid.UUID
+    ticket_id: uuid.UUID
+    status: str
+    status_label: str
+
+
+@dataclass(frozen=True)
 class ArticleSuggestion:
     """Предложенная статья базы знаний (E6-6, #130). Без ПДн — публичный контент БЗ."""
 

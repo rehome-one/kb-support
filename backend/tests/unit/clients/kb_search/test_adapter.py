@@ -15,7 +15,7 @@ from api.clients.base import ResilientHttpClient
 from api.clients.circuit_breaker import CircuitBreaker
 from api.clients.kb_search import adapter as adapter_module
 from api.clients.kb_search.adapter import HttpKbSearchClient
-from api.clients.kb_search.models import OperatorReply, ReplyOutcome
+from api.clients.kb_search.models import OperatorReply, ReplyOutcome, StatusNotification
 from api.clients.retry import RetryPolicy
 
 CHAT_SESSION_ID = uuid.uuid4()
@@ -148,6 +148,64 @@ async def test_message_body_not_logged() -> None:
     assert warn.called
     logged = " ".join(str(arg) for call in warn.call_args_list for arg in call.args)
     assert secret not in logged
+
+
+# --- send_status_notification (E7-8, #149) — выделенный путь статус-уведомлений ---
+
+
+def _status() -> StatusNotification:
+    return StatusNotification(
+        chat_session_id=CHAT_SESSION_ID,
+        ticket_id=TICKET_ID,
+        status="RESOLVED",
+        status_label="Решена",
+    )
+
+
+async def test_status_202_delivered() -> None:
+    client = _make(lambda req: httpx.Response(202))
+    assert await client.send_status_notification(_status()) is ReplyOutcome.DELIVERED
+
+
+async def test_status_404_session_gone() -> None:
+    client = _make(lambda req: httpx.Response(404))
+    assert await client.send_status_notification(_status()) is ReplyOutcome.SESSION_GONE
+
+
+async def test_status_5xx_degraded() -> None:
+    client = _make(lambda req: httpx.Response(503), attempts=2)
+    assert await client.send_status_notification(_status()) is ReplyOutcome.DEGRADED
+
+
+async def test_status_transport_error_degraded() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    client = _make(handler, attempts=2)
+    assert await client.send_status_notification(_status()) is ReplyOutcome.DEGRADED
+
+
+async def test_status_body_and_headers() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        import json
+
+        seen["auth"] = req.headers.get("authorization")
+        seen["idem"] = req.headers.get("idempotency-key")
+        seen["path"] = req.url.path
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(202)
+
+    client = _make(handler, token="m2m-secret")
+    await client.send_status_notification(_status())
+    assert seen["auth"] == "Bearer m2m-secret"
+    # Идемпотентность по ticket:status (не маскируется под operator-reply).
+    assert seen["idem"] == f"{TICKET_ID}:RESOLVED"
+    assert seen["path"] == f"/api/v1/chat/sessions/{CHAT_SESSION_ID}/status-notification"
+    body = seen["body"]
+    assert isinstance(body, dict)
+    assert body == {"ticket_id": str(TICKET_ID), "status": "RESOLVED", "status_label": "Решена"}
 
 
 # --- suggest_articles (E6-6, #130) ---
