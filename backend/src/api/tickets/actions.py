@@ -10,13 +10,15 @@ assign / escalate / resolve / close / reopen / rate. Каждая — измен
 
 from __future__ import annotations
 
+import datetime
 import uuid
+from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.errors import ProblemException
 from api.tickets.case_state_machine import is_allowed_case_transition
-from api.tickets.enums import TicketCaseState, TicketStatus, TicketTeam
+from api.tickets.enums import TicketCaseState, TicketDecision, TicketStatus, TicketTeam
 from api.tickets.history import TicketHistoryAction, TicketHistoryRepository
 from api.tickets.models import Ticket
 from api.tickets.rating_metrics import record_rating
@@ -237,6 +239,65 @@ class TicketActionService:
             TicketHistoryAction.CASE_STATE_CHANGED,
             from_value={"case_state": current.value},
             to_value=to_value,
+        )
+
+    async def decide(
+        self,
+        ticket: Ticket,
+        actor_id: uuid.UUID,
+        *,
+        decision: TicketDecision,
+        approved_amount: float | None,
+        reason: str | None,
+    ) -> None:
+        """Решение по претензии (FR-9.3, E10-3 #193). Связано с case_state (решение Архитектора):
+        FULL/PARTIAL → DECISION_MADE, REJECTED → REJECTED (через машину; запрещённое → 422).
+
+        Повтор запрещён (decision уже принят → 409). Валидация: FULL/PARTIAL требуют
+        approved_amount, PARTIAL/REJECTED требуют reason (иначе 422). Суммы хранятся точно
+        (Decimal), kb-support деньги НЕ считает (FR-9.8). Доставка решения в ЛК — seam (E10-7);
+        здесь только `decision_notified_at`. Гейт legal/finance — в роутере.
+        """
+        if ticket.decision is not None:
+            raise ProblemException.conflict(detail="Decision already made for this ticket")
+        if decision in (TicketDecision.FULL, TicketDecision.PARTIAL) and approved_amount is None:
+            raise ProblemException.unprocessable(
+                detail="approved_amount is required for FULL/PARTIAL decision"
+            )
+        if decision in (TicketDecision.PARTIAL, TicketDecision.REJECTED) and not reason:
+            raise ProblemException.unprocessable(
+                detail="reason is required for PARTIAL/REJECTED decision"
+            )
+        if ticket.case_state is None:
+            raise ProblemException.unprocessable(detail="Ticket has no claim case to decide")
+        current = TicketCaseState(ticket.case_state)
+        target = (
+            TicketCaseState.REJECTED
+            if decision is TicketDecision.REJECTED
+            else TicketCaseState.DECISION_MADE
+        )
+        if not is_allowed_case_transition(current, target):
+            raise ProblemException.unprocessable(
+                detail=f"Cannot decide from case state {current.value}"
+            )
+        amount = (
+            Decimal(str(approved_amount)).quantize(Decimal("0.01"))
+            if approved_amount is not None
+            else None
+        )
+        ticket.decision = decision.value
+        ticket.approved_amount = amount
+        ticket.decision_reason = reason
+        ticket.decision_notified_at = datetime.datetime.now(datetime.UTC)
+        ticket.case_state = target.value
+        await self._session.flush()
+        to_value: dict[str, object] = {"decision": decision.value, "case_state": target.value}
+        if amount is not None:
+            to_value["approved_amount"] = str(amount)
+        if reason:
+            to_value["reason"] = reason
+        await self._history.record(
+            ticket.id, actor_id, TicketHistoryAction.CASE_DECIDED, to_value=to_value
         )
 
     async def _approve_payout(self, ticket: Ticket, actor_id: uuid.UUID, note: str | None) -> None:

@@ -1393,3 +1393,94 @@ def test_case_state_noop_no_history_growth(client: TestClient) -> None:
     resp = _action(client, ticket_id, "case-state", case_state="UNDER_REVIEW")  # no-op
     assert resp.status_code == 200
     assert len(_history_actions(client, ticket_id)) == before  # журнал не вырос
+
+
+# --- POST /decision (E10-3 #193) ---
+
+
+def _claims_operator() -> Principal:
+    return Principal(
+        user_id=uuid.uuid4(),
+        kind=PrincipalKind.OPERATOR,
+        teams=frozenset({TicketTeam.LEGAL}),
+    )
+
+
+def _decide(client: TestClient, ticket_id: str, **body: object) -> Response:
+    return client.post(f"/api/v1/support/tickets/{ticket_id}/decision", json=body)
+
+
+def test_decision_full_sets_fields_and_case_state(client: TestClient) -> None:
+    _use(_claims_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "UNDER_REVIEW")
+    resp = _decide(client, ticket_id, decision="FULL", approved_amount=15000.50)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["decision"] == "FULL"
+    assert data["approved_amount"] == 15000.5
+    assert data["case_state"] == "DECISION_MADE"  # связка (решение Архитектора)
+    assert data["decision_notified_at"] is not None
+    assert "case_decided" in _history_actions(client, ticket_id)
+
+
+def test_decision_rejected_sets_case_state_rejected(client: TestClient) -> None:
+    _use(_claims_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "UNDER_REVIEW")
+    resp = _decide(client, ticket_id, decision="REJECTED", reason="недостаточно доказательств")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["case_state"] == "REJECTED"
+
+
+def test_decision_full_without_amount_422(client: TestClient) -> None:
+    _use(_claims_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "UNDER_REVIEW")
+    assert _decide(client, ticket_id, decision="FULL").status_code == 422
+
+
+def test_decision_partial_without_reason_422(client: TestClient) -> None:
+    _use(_claims_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "UNDER_REVIEW")
+    assert _decide(client, ticket_id, decision="PARTIAL", approved_amount=100).status_code == 422
+
+
+def test_decision_from_claim_submitted_forbidden_422(client: TestClient) -> None:
+    # Нельзя решать до рассмотрения (case_state CLAIM_SUBMITTED → DECISION_MADE запрещён машиной).
+    _use(_claims_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "CLAIM_SUBMITTED")
+    assert _decide(client, ticket_id, decision="FULL", approved_amount=100).status_code == 422
+
+
+def test_decision_repeat_conflict_409(client: TestClient) -> None:
+    _use(_claims_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "UNDER_REVIEW")
+    assert _decide(client, ticket_id, decision="FULL", approved_amount=100).status_code == 200
+    # Повторное решение запрещено (decision уже принят).
+    assert _decide(client, ticket_id, decision="REJECTED", reason="x").status_code == 409
+
+
+def test_decision_non_claims_operator_403(client: TestClient) -> None:
+    _use(_operator())  # команда SUPPORT, не legal/finance
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "UNDER_REVIEW")
+    assert _decide(client, ticket_id, decision="FULL", approved_amount=100).status_code == 403
+
+
+def test_decision_requester_403(client: TestClient) -> None:
+    requester = uuid.uuid4()
+    _use(Principal(user_id=requester, kind=PrincipalKind.REQUESTER))
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "UNDER_REVIEW")
+    assert _decide(client, ticket_id, decision="FULL", approved_amount=100).status_code == 403
+
+
+def test_decision_unknown_ticket_404(client: TestClient) -> None:
+    _use(_claims_operator())
+    assert (
+        _decide(client, str(uuid.uuid4()), decision="FULL", approved_amount=100).status_code == 404
+    )

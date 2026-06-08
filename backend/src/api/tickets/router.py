@@ -61,6 +61,7 @@ from api.tickets.requester_context import (
 from api.tickets.schemas import (
     AssignInput,
     CaseStateTransitionInput,
+    DecisionInput,
     EmailIngest,
     EscalateInput,
     Pagination,
@@ -114,6 +115,12 @@ def _require_operator(principal: Principal) -> None:
     """RBAC action-эндпоинтов, доступных только операторам."""
     if not principal.is_operator:
         raise ProblemException.forbidden(detail="Operator role required")
+
+
+def _require_claims_operator(principal: Principal) -> None:
+    """RBAC решения по претензии (D3): оператор команды legal/finance. Без отдельного scope."""
+    if not principal.is_operator or not (principal.teams & {TicketTeam.LEGAL, TicketTeam.FINANCE}):
+        raise ProblemException.forbidden(detail="Claims decision requires legal/finance team")
 
 
 def _ticket_envelope(ticket: Ticket, x_request_id: str | None) -> TicketEnvelope:
@@ -725,6 +732,32 @@ async def transition_case_state(
     _require_operator(principal)
     await TicketActionService(session).transition_case_state(
         ticket, principal.user_id, target=payload.case_state, note=payload.note
+    )
+    await session.commit()
+    await session.refresh(ticket)
+    return _ticket_envelope(ticket, x_request_id)
+
+
+@router.post("/{ticket_id}/decision", response_model=TicketEnvelope, summary="Решение по претензии")
+async def decide_ticket(
+    ticket_id: uuid.UUID,
+    payload: DecisionInput,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    """E10-3 (#193, FR-9.3): решение FULL/PARTIAL/REJECTED. Связано с case_state (FULL/PARTIAL→
+    DECISION_MADE, REJECTED→REJECTED). Повтор→409. Гейт — claims-оператор (legal/finance, D3)."""
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    _require_claims_operator(principal)
+    await TicketActionService(session).decide(
+        ticket,
+        principal.user_id,
+        decision=payload.decision,
+        approved_amount=payload.approved_amount,
+        reason=payload.reason,
     )
     await session.commit()
     await session.refresh(ticket)
