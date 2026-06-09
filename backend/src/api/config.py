@@ -189,6 +189,32 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Upstream платёжного контура претензий (E10-7, #197, ADR-0014). Провизорные
+    # контракты (TD-UP-001), resilient AT-003, config-gated по ПУСТОМУ токену (инертно
+    # до ops/#77). Деньги не считаем — только запрос выплаты и фиксация ссылок. ---
+    bank_provider_api_base_url: str = Field(
+        default="http://localhost:8090",
+        description="Базовый URL BankProvider (releasePayout). Провизорный контракт ADR-0014.",
+    )
+    bank_provider_api_token: str = Field(
+        default="",
+        description=(
+            "m2m-токен BankProvider (dev/test StaticTokenProvider). ПУСТО → выплата не "
+            "запрашивается (fire-after не планируется). Реальный ClientCredentials — #77."
+        ),
+    )
+    payment_release_checker_api_base_url: str = Field(
+        default="http://localhost:8091",
+        description="Базовый URL PaymentReleaseChecker (проверка возможности выплаты). ADR-0014.",
+    )
+    payment_release_checker_api_token: str = Field(
+        default="",
+        description=(
+            "m2m-токен PaymentReleaseChecker (dev/test). ПУСТО → проверка не выполняется "
+            "(информационна, case_state не блокирует — ADR-0014 U4). Реальный — #77."
+        ),
+    )
+
     # --- SLA-воркер (E4-6, #90, ADR-0007 Решение 1). Dramatiq-actor проактивно
     # сканирует БД по дедлайнам и дёргает breach-хук (seam под эскалацию E5/#18).
     # ПУСТОЙ sla_worker_broker_url = выключено (StubBroker, actor инертен) — тот же
