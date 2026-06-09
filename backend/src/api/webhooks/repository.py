@@ -30,6 +30,18 @@ class WebhookSubscriptionRepository:
         )
         return (await self._session.execute(stmt)).scalars().all()
 
+    async def list_active_for_event(self, event: str) -> Sequence[WebhookSubscription]:
+        """Активные подписки, чьи `events` содержат `event` (JSONB `@>`). Для доставки PR-B."""
+        stmt = (
+            select(WebhookSubscription)
+            .where(
+                WebhookSubscription.is_active.is_(True),
+                WebhookSubscription.events.contains([event]),
+            )
+            .order_by(WebhookSubscription.created_at.desc(), WebhookSubscription.id)
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
     async def create(self, values: dict[str, Any]) -> WebhookSubscription:
         """Создать подписку из готовых значений колонок (валидация — в схеме/роутере)."""
         subscription = WebhookSubscription(**values)
