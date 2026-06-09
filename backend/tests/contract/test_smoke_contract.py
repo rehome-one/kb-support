@@ -549,6 +549,28 @@ def test_ticket_exposes_sla_state(operator_client: TestClient) -> None:
     assert_response_conforms("/api/v1/support/tickets/{id}", "get", "200", body)
 
 
+@requires_postgres
+def test_webhook_responses_conform(admin_client: TestClient) -> None:
+    """AT-002 (#198 PR-A): create/list webhooks соответствуют схеме WebhookSubscription.
+
+    Создание возвращает секрет (контракт «только при создании»); список — без секрета."""
+    create = admin_client.post(
+        "/api/v1/support/webhooks",
+        json={
+            "url": "https://subscriber.example.com/contract",
+            "events": ["ticket.case_decided", "ticket.payout_released", "ticket.insurance_event"],
+        },
+    )
+    assert create.status_code == 201, create.text
+    assert create.json()["data"]["secret"]  # секрет в ответе создания
+    assert_response_conforms("/api/v1/support/webhooks", "post", "201", create.json())
+
+    listed = admin_client.get("/api/v1/support/webhooks")
+    assert listed.status_code == 200
+    assert listed.json()["data"], "ожидалась ≥1 подписка для валидации WebhookSubscription"
+    assert_response_conforms("/api/v1/support/webhooks", "get", "200", listed.json())
+
+
 def test_prism_mock_serves_tickets(prism_mock: str) -> None:
     """Опционально (RUN_PRISM_CONTRACT=1): Prism mock из спеки отдаёт валидный ответ."""
     resp = httpx.get(
