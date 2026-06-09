@@ -214,6 +214,19 @@ class Settings(BaseSettings):
             "(информационна, case_state не блокирует — ADR-0014 U4). Реальный — #77."
         ),
     )
+    financial_ledger_api_base_url: str = Field(
+        default="http://localhost:8092",
+        description="Базовый URL FinancialLedger (проводка-ссылка решения, E10-7 PR-2). ADR-0014.",
+    )
+    financial_ledger_api_token: str = Field(
+        default="",
+        description=(
+            "m2m-токен FinancialLedger (dev/test). ПУСТО → проводка не пишется (fire-after не "
+            "планируется). Реальный ClientCredentials — #77."
+        ),
+    )
+    # Доставка решения в ЛК (E10-7 PR-2) переиспользует platform_api_* (тот же сосед
+    # rehome.one, что #71) — отдельных ключей нет (паттерн #166 reuse соседа).
 
     # --- SLA-воркер (E4-6, #90, ADR-0007 Решение 1). Dramatiq-actor проактивно
     # сканирует БД по дедлайнам и дёргает breach-хук (seam под эскалацию E5/#18).
