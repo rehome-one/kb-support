@@ -67,6 +67,22 @@ async def test_amount_as_string_and_null_for_rejected() -> None:
     }
 
 
+async def test_nonzero_amount_serialized_as_string() -> None:
+    # FR-9.8: точность — сумма строкой, НЕ float (ловит мутацию str→float).
+    captured: dict[str, object] = {}
+
+    def _h(req: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        captured["body"] = _json.loads(req.content)
+        return httpx.Response(202, json={"entry_id": "e-3"})
+
+    await _make(_h).record_entry(_entry(amount=Decimal("999.99")))
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["amount"] == "999.99"  # строка, не 999.99 (float)
+
+
 async def test_5xx_propagates() -> None:
     with pytest.raises(ExternalServiceError):
         await _make(lambda req: httpx.Response(503), attempts=1).record_entry(_entry())

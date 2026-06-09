@@ -55,13 +55,19 @@ async def test_202_ok_no_raise() -> None:
     captured: dict[str, object] = {}
 
     def _h(req: httpx.Request) -> httpx.Response:
+        import json as _json
+
         captured["path"] = req.url.path
         captured["auth"] = req.headers.get("Authorization")
+        captured["body"] = _json.loads(req.content)
         return httpx.Response(202)
 
     await _make(_h).notify_decision(_notification())
     assert captured["path"] == f"/api/v1/claims/{_TICKET}/decision-notification"
     assert captured["auth"] == "Bearer tok"
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["approved_amount"] == "500.00"  # FR-9.8: сумма строкой, не float
 
 
 async def test_5xx_propagates() -> None:
