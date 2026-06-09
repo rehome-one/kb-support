@@ -33,6 +33,17 @@ _CURRENCY_RUB = "RUB"
 _CLEARANCE_KEY = "payment_clearance"
 
 
+def is_newly_paid(ticket: Ticket, old_case_state: str | None) -> bool:
+    """Заявка ТОЛЬКО что перешла в PAID (терминал).
+
+    Единый предикат для fire-after выплаты (E10-7) и webhook `payout_released` (E10-8 PR-B) —
+    чтобы условие newly-PAID не дублировалось в двух местах."""
+    return (
+        ticket.case_state == TicketCaseState.PAID.value
+        and old_case_state != TicketCaseState.PAID.value
+    )
+
+
 def maybe_schedule_payout(
     background: BackgroundTasks,
     ticket: Ticket,
@@ -45,11 +56,7 @@ def maybe_schedule_payout(
     планирования (для тестов). Без approved_amount — пропускаем (нечего выплачивать)."""
     if not settings.bank_provider_api_token:  # gate: банк выключен (инертно до #77)
         return False
-    newly_paid = (
-        ticket.case_state == TicketCaseState.PAID.value
-        and old_case_state != TicketCaseState.PAID.value
-    )
-    if not newly_paid:
+    if not is_newly_paid(ticket, old_case_state):
         return False
     if ticket.approved_amount is None:
         _logger.warning("payout skipped: no approved_amount ticket=%s", ticket.id)

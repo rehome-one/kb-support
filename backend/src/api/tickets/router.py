@@ -58,7 +58,11 @@ from api.tickets.messages import (
 )
 from api.tickets.models import Ticket
 from api.tickets.pagination import TicketSortKey
-from api.tickets.payout_dispatch import maybe_record_clearance, maybe_schedule_payout
+from api.tickets.payout_dispatch import (
+    is_newly_paid,
+    maybe_record_clearance,
+    maybe_schedule_payout,
+)
 from api.tickets.repository import TicketFilters, TicketRepository
 from api.tickets.requester_context import (
     RequesterContext,
@@ -102,6 +106,8 @@ from api.tickets.suggested_articles import (
     SuggestedArticlesEnvelope,
     suggest_for_ticket,
 )
+from api.webhooks.dispatcher import schedule_webhook_event
+from api.webhooks.enums import WebhookEvent
 
 router = APIRouter(prefix="/api/v1/support/tickets", tags=["Tickets"])
 
@@ -749,8 +755,14 @@ async def transition_case_state(
     await maybe_record_clearance(session, ticket, old_case_state, checker)
     await session.commit()
     await session.refresh(ticket)
+    settings = get_settings()
     # releasePayout — fire-after best-effort после ответа (E10-7, U3).
-    maybe_schedule_payout(background, ticket, old_case_state, get_settings())
+    maybe_schedule_payout(background, ticket, old_case_state, settings)
+    # webhook ticket.payout_released — на переходе в PAID (E10-8 PR-B, ADR-0015 D7).
+    if is_newly_paid(ticket, old_case_state):
+        await schedule_webhook_event(
+            background, session, ticket, WebhookEvent.PAYOUT_RELEASED, settings
+        )
     return _ticket_envelope(ticket, x_request_id)
 
 
@@ -784,4 +796,6 @@ async def decide_ticket(
     settings = get_settings()
     maybe_schedule_ledger(background, ticket, settings)
     maybe_schedule_decision_delivery(background, ticket, settings)
+    # webhook ticket.case_decided — после решения (E10-8 PR-B, ADR-0015 D5).
+    await schedule_webhook_event(background, session, ticket, WebhookEvent.CASE_DECIDED, settings)
     return _ticket_envelope(ticket, x_request_id)
