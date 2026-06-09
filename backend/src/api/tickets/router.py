@@ -22,6 +22,8 @@ from api.clients.kb_files import KbFilesClient
 from api.clients.kb_files.deps import get_kb_files_client
 from api.clients.kb_search import KbSearchClient
 from api.clients.kb_search.deps import get_kb_search_client
+from api.clients.payment_checker import PaymentReleaseCheckerClient
+from api.clients.payment_checker.deps import get_payment_release_checker_client
 from api.clients.platform import PlatformClient
 from api.config import get_settings
 from api.db import get_session
@@ -52,6 +54,7 @@ from api.tickets.messages import (
 )
 from api.tickets.models import Ticket
 from api.tickets.pagination import TicketSortKey
+from api.tickets.payout_dispatch import maybe_record_clearance, maybe_schedule_payout
 from api.tickets.repository import TicketFilters, TicketRepository
 from api.tickets.requester_context import (
     RequesterContext,
@@ -720,21 +723,30 @@ async def rate_ticket(
 async def transition_case_state(
     ticket_id: uuid.UUID,
     payload: CaseStateTransitionInput,
+    background: BackgroundTasks,
     principal: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_session),
+    checker: PaymentReleaseCheckerClient | None = Depends(get_payment_release_checker_client),
     x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
 ) -> TicketEnvelope:
     """E10-2 (#192): переход case_state. Запрещённый → 422; PAYOUT_PENDING→PAID требует
-    «4 глаза» (двое разных сотрудников, D6). Гейт — оператор (legal/finance decision — E10-3)."""
+    «4 глаза» (двое разных сотрудников, D6). Гейт — оператор (legal/finance decision — E10-3).
+    E10-7 (#197): вход в PAYOUT_PENDING → checker-вердикт в payload (синхронно, информационно);
+    переход в PAID → fire-after запрос выплаты (оба config-gated, инертны до ops)."""
     ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
     if ticket is None:
         raise ProblemException.not_found(detail="Ticket not found")
     _require_operator(principal)
+    old_case_state = ticket.case_state
     await TicketActionService(session).transition_case_state(
         ticket, principal.user_id, target=payload.case_state, note=payload.note
     )
+    # PaymentReleaseChecker — синхронно (в этой транзакции), информационно (E10-7, U4).
+    await maybe_record_clearance(session, ticket, old_case_state, checker)
     await session.commit()
     await session.refresh(ticket)
+    # releasePayout — fire-after best-effort после ответа (E10-7, U3).
+    maybe_schedule_payout(background, ticket, old_case_state, get_settings())
     return _ticket_envelope(ticket, x_request_id)
 
 

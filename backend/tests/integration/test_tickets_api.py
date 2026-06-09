@@ -25,6 +25,8 @@ from sqlalchemy.pool import NullPool
 
 from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal, PrincipalKind
+from api.clients.payment_checker import Clearance
+from api.clients.payment_checker.deps import get_payment_release_checker_client
 from api.config import get_settings
 from api.db import get_session
 from api.main import app
@@ -1640,3 +1642,87 @@ def test_guarantee_regress_seam_creates_case_details_when_missing(client: TestCl
     assert details["case_type"] == "GUARANTEE"
     assert isinstance(details["payload"], dict)
     assert "regress_due_at" in details["payload"]
+
+
+# --- E10-7 PR-1: PaymentReleaseChecker врезка (#197) ---
+
+
+class _FakeChecker:
+    """Фейк PaymentReleaseChecker для dependency_overrides."""
+
+    def __init__(self, result: Clearance | None) -> None:
+        self._result = result
+
+    async def check_clearance(self, ticket_id: uuid.UUID) -> Clearance | None:
+        return self._result
+
+
+def _to_payout_pending(client: TestClient, ticket_id: str) -> Response:
+    _set_case_state(ticket_id, "DECISION_MADE")
+    return _action(client, ticket_id, "case-state", case_state="PAYOUT_PENDING")
+
+
+def test_clearance_flag_written_on_payout_pending(client: TestClient) -> None:
+    _use(_operator())
+    ticket_id = _create(client, type="COMPENSATION", channel="LK_CLAIM").json()["data"]["id"]
+    app.dependency_overrides[get_payment_release_checker_client] = lambda: _FakeChecker(
+        Clearance(clearable=False, reason="hold")
+    )
+    try:
+        resp = _to_payout_pending(client, ticket_id)
+    finally:
+        app.dependency_overrides.pop(get_payment_release_checker_client, None)
+    assert resp.status_code == 200, resp.text
+    details = _get_case_details(ticket_id)
+    assert details is not None
+    payload = details["payload"]
+    assert isinstance(payload, dict)
+    assert payload.get("payment_clearance") == {"clearable": False, "reason": "hold"}
+
+
+def test_no_clearance_flag_when_checker_off(client: TestClient) -> None:
+    # Дефолт: checker выключен (пустой токен) → фабрика отдаёт None → флаг не пишется.
+    _use(_operator())
+    ticket_id = _create(client, type="COMPENSATION", channel="LK_CLAIM").json()["data"]["id"]
+    resp = _to_payout_pending(client, ticket_id)
+    assert resp.status_code == 200, resp.text
+    details = _get_case_details(ticket_id)
+    assert details is not None
+    assert isinstance(details["payload"], dict)
+    assert "payment_clearance" not in details["payload"]
+
+
+def test_clearance_degradation_none_no_flag(client: TestClient) -> None:
+    # Клиент включён, но деградация (None) → флаг не пишется, переход не блокируется.
+    _use(_operator())
+    ticket_id = _create(client, type="COMPENSATION", channel="LK_CLAIM").json()["data"]["id"]
+    app.dependency_overrides[get_payment_release_checker_client] = lambda: _FakeChecker(None)
+    try:
+        resp = _to_payout_pending(client, ticket_id)
+    finally:
+        app.dependency_overrides.pop(get_payment_release_checker_client, None)
+    assert resp.status_code == 200, resp.text
+    details = _get_case_details(ticket_id)
+    assert details is not None
+    assert isinstance(details["payload"], dict)
+    assert "payment_clearance" not in details["payload"]
+
+
+def test_clearance_flag_created_when_case_details_missing(client: TestClient) -> None:
+    # Defensive create-ветка: деталей нет → maybe_record_clearance создаёт их с флагом.
+    _use(_operator())
+    ticket_id = _create(client, type="COMPENSATION", channel="LK_CLAIM").json()["data"]["id"]
+    _delete_case_details(ticket_id)
+    app.dependency_overrides[get_payment_release_checker_client] = lambda: _FakeChecker(
+        Clearance(clearable=True, reason=None)
+    )
+    try:
+        resp = _to_payout_pending(client, ticket_id)
+    finally:
+        app.dependency_overrides.pop(get_payment_release_checker_client, None)
+    assert resp.status_code == 200, resp.text
+    details = _get_case_details(ticket_id)
+    assert details is not None
+    assert details["case_type"] == "COMPENSATION"
+    assert isinstance(details["payload"], dict)
+    assert details["payload"].get("payment_clearance") == {"clearable": True, "reason": None}
