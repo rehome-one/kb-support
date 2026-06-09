@@ -26,6 +26,7 @@ from api.observability.metrics import MetricsMiddleware, metrics_response
 from api.observability.request_id import RequestIdMiddleware
 from api.sla.router import router as sla_router
 from api.tickets.router import router as tickets_router
+from api.webhooks.router import router as webhooks_router
 
 configure_logging(get_settings().log_level)
 _logger = get_logger("api")
@@ -46,6 +47,7 @@ app.include_router(sla_router)
 app.include_router(automation_router)
 app.include_router(canned_router)
 app.include_router(analytics_router)
+app.include_router(webhooks_router)
 
 
 class HealthzResponse(BaseModel):

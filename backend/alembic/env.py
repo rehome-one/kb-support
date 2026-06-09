@@ -21,6 +21,7 @@ import api.sla.models  # noqa: F401  (side-effect: регистрация мод
 import api.tickets.history  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
 import api.tickets.messages  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
 import api.tickets.models  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
+import api.webhooks.models  # noqa: F401  (side-effect: регистрация моделей в Base.metadata)
 from api.config import get_settings
 from api.db.base import Base
 
