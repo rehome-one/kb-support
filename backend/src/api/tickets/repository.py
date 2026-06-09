@@ -16,6 +16,7 @@ from api.auth.principal import Principal
 from api.automation.enums import AutomationTrigger
 from api.sla.assignment import apply_sla
 from api.tickets.access import visibility_filter
+from api.tickets.claims_intake import CLAIMS_TYPES, apply_claim_intake
 from api.tickets.enums import (
     AccessLevel,
     AuthorType,
@@ -154,6 +155,12 @@ class TicketRepository:
         # SLA-матчинг + дедлайны (E4-3 #87) — после flush (нужен created_at).
         await apply_sla(self._session, ticket)
         record_ticket_created(ticket)  # rate входящих (FR-7.3, #168)
+        # Приём претензии (E10-5 #195): инициализация case_state + TicketCaseDetails для
+        # claims-типов. ПОСЛЕ flush и ДО _run_automation — чтобы on_create-правила (D8)
+        # видели уже инициализированное разбирательство. Только generic create несёт
+        # claims-каналы (from_chat/from_email форсят AI_CHAT/EMAIL — claims недостижимы).
+        if ticket.type in CLAIMS_TYPES:
+            await apply_claim_intake(self._session, ticket)
         # ФЗ-152 / §3.7: первая запись журнала — создание. actor = принципал
         # (для оператора-от-имени-заявителя actor — оператор, requester_id — заявитель).
         await self._history.record(
