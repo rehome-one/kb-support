@@ -21,8 +21,16 @@ from api.observability.logging import get_logger
 from api.sla.worker.hooks import BreachHook, SlaBreachEvent
 from api.tickets.enums import TicketStatus
 from api.tickets.models import Ticket
-from api.tickets.sla_query import first_response_breached_clause, resolution_breached_clause
-from api.tickets.sla_state import is_first_response_breached, is_resolution_breached
+from api.tickets.sla_query import (
+    first_response_breached_clause,
+    payout_breached_clause,
+    resolution_breached_clause,
+)
+from api.tickets.sla_state import (
+    is_first_response_breached,
+    is_payout_breached,
+    is_resolution_breached,
+)
 
 _logger = get_logger("sla.worker")
 
@@ -50,10 +58,19 @@ def select_due_tickets(now: datetime.datetime, *, batch_limit: int) -> Select[tu
         select(Ticket)
         .where(
             Ticket.status.notin_(_TERMINAL_STATUSES),
-            or_(resolution_breached_clause(now), first_response_breached_clause(now)),
+            or_(
+                resolution_breached_clause(now),
+                first_response_breached_clause(now),
+                payout_breached_clause(now),
+            ),
         )
         .order_by(
-            func.least(Ticket.resolution_due_at, Ticket.first_response_due_at).asc(),
+            # LEAST игнорирует NULL (Postgres) — payout-only breach не вытесняется за batch_limit.
+            func.least(
+                Ticket.resolution_due_at,
+                Ticket.first_response_due_at,
+                Ticket.payout_due_at,
+            ).asc(),
             Ticket.id.asc(),
         )
         .limit(batch_limit)
@@ -77,6 +94,11 @@ def _build_event(ticket: Ticket, now: datetime.datetime) -> SlaBreachEvent:
             resolution_due_at=ticket.resolution_due_at,
             resolved_at=ticket.resolved_at,
             sla_paused_at=ticket.sla_paused_at,
+        ),
+        payout_breached=is_payout_breached(
+            now,
+            case_state=ticket.case_state,
+            payout_due_at=ticket.payout_due_at,
         ),
     )
 

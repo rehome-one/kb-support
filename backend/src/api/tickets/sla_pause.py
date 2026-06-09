@@ -28,6 +28,12 @@ def apply_pause_accounting(ticket: Ticket, old_status: str, now: datetime.dateti
     паузой) — накопить длительность и сдвинуть `resolution_due_at`. Переход между
     двумя паузами (PENDING↔WAITING) — пауза продолжается, начало не сбрасывается.
     """
+    # Claims-заявки: срок рассмотрения 30 кал.дн (Договор 5.8.7) — КАЛЕНДАРНО-АБСОЛЮТНЫЙ,
+    # паузами не двигается (E10-6 #196, решение Архитектора). resolution_due_at для них
+    # несёт claims-дедлайн, а не общий SLA-норматив, поэтому pause-учёт к ним не применяем.
+    if ticket.case_state is not None:
+        return
+
     was_paused = old_status in _PAUSE_STATUSES
     is_paused = ticket.status in _PAUSE_STATUSES
 

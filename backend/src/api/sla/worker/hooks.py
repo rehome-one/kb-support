@@ -31,6 +31,9 @@ class SlaBreachEvent:
     team: str | None
     first_response_breached: bool
     resolution_breached: bool
+    # Дедлайн выплаты претензии (claims, E10-6 #196). Default — backward-compatible
+    # для существующих конструкторов/тестов E4.
+    payout_breached: bool = False
 
 
 # Сигнатура seam'а эскалации. E5/#18 подменяет дефолт реальным действием.
@@ -43,6 +46,8 @@ def _legs(event: SlaBreachEvent) -> str:
         legs.append("first_response")
     if event.resolution_breached:
         legs.append("resolution")
+    if event.payout_breached:
+        legs.append("payout")
     return ",".join(legs) or "-"
 
 

@@ -29,7 +29,7 @@ from api.db import get_session
 from api.main import app
 from api.sla.worker.hooks import SlaBreachEvent
 from api.sla.worker.scan import scan_and_escalate
-from api.tickets.enums import TicketStatus, TicketTeam
+from api.tickets.enums import TicketCaseState, TicketStatus, TicketTeam
 from api.tickets.models import Ticket
 
 pytestmark = pytest.mark.skipif(
@@ -138,3 +138,36 @@ def test_scan_excludes_paused_within_deadline(
         return {e.ticket_id for e in events}
 
     assert paused_id not in asyncio.run(_run())
+
+
+def test_scan_returns_overdue_payout_claim(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # Просроченная выплата претензии (PAYOUT_PENDING + payout_due_at в прошлом) — эскалируется
+    # тем же воркером (E10-6 #196), нога breach = payout.
+    with TestClient(app) as client:
+        payout_id = _create_ticket(client)
+
+    async def _run() -> list[SlaBreachEvent]:
+        async with factory() as session:
+            t = await session.get(Ticket, payout_id)
+            assert t is not None
+            t.case_state = TicketCaseState.PAYOUT_PENDING.value
+            t.payout_due_at = _FAR_PAST
+            t.resolution_due_at = None  # без resolution-breach: ловим именно payout
+            t.first_response_due_at = None
+            t.status = TicketStatus.OPEN.value
+            await session.commit()
+
+        events: list[SlaBreachEvent] = []
+
+        async def hook(event: SlaBreachEvent) -> None:
+            events.append(event)
+
+        async with factory() as session:
+            return await scan_and_escalate(session, now=_NOW, hook=hook, batch_limit=500)
+
+    events = asyncio.run(_run())
+    by_id = {e.ticket_id: e for e in events}
+    assert payout_id in by_id
+    assert by_id[payout_id].payout_breached is True

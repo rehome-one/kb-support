@@ -17,8 +17,16 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.errors import ProblemException
+from api.tickets.case_repository import TicketCaseDetailsRepository
 from api.tickets.case_state_machine import is_allowed_case_transition
-from api.tickets.enums import TicketCaseState, TicketDecision, TicketStatus, TicketTeam
+from api.tickets.claims_sla import compute_payout_due_at, compute_regress_due_at
+from api.tickets.enums import (
+    CaseType,
+    TicketCaseState,
+    TicketDecision,
+    TicketStatus,
+    TicketTeam,
+)
 from api.tickets.history import TicketHistoryAction, TicketHistoryRepository
 from api.tickets.models import Ticket
 from api.tickets.rating_metrics import record_rating
@@ -208,12 +216,16 @@ class TicketActionService:
         *,
         target: TicketCaseState,
         note: str | None = None,
+        now: datetime.datetime | None = None,
     ) -> None:
         """Переход case_state разбирательства (§3.2.1, ADR-0013 D5). Запрещённый → 422.
 
         Не претензионная заявка (case_state=None) → 422. Идемпотентный no-op (cur==target) —
         без записи в журнал. PAYOUT_PENDING→PAID требует «4 глаза» (D6) — см. `_approve_payout`.
+        Вход в PAYOUT_PENDING выставляет `payout_due_at` = now + 10 раб.дн (Договор 5.8.8,
+        E10-6 #196, решение Архитектора Q2). `now` инъектируется (тестируемость).
         """
+        current_now = now or datetime.datetime.now(datetime.UTC)
         if ticket.case_state is None:
             raise ProblemException.unprocessable(
                 detail="Ticket has no claim case state to transition"
@@ -226,8 +238,11 @@ class TicketActionService:
         if current == target:
             return  # идемпотентный no-op — журнал не засоряем
         if current is TicketCaseState.PAYOUT_PENDING and target is TicketCaseState.PAID:
-            await self._approve_payout(ticket, actor_id, note)
+            await self._approve_payout(ticket, actor_id, note, now=current_now)
             return
+        if target is TicketCaseState.PAYOUT_PENDING:
+            # Дедлайн выплаты 10 раб.дн от входа в фазу выплаты (Договор 5.8.8, Q2).
+            ticket.payout_due_at = compute_payout_due_at(current_now)
         ticket.case_state = target.value
         await self._session.flush()
         to_value: dict[str, object] = {"case_state": target.value}
@@ -300,12 +315,15 @@ class TicketActionService:
             ticket.id, actor_id, TicketHistoryAction.CASE_DECIDED, to_value=to_value
         )
 
-    async def _approve_payout(self, ticket: Ticket, actor_id: uuid.UUID, note: str | None) -> None:
+    async def _approve_payout(
+        self, ticket: Ticket, actor_id: uuid.UUID, note: str | None, *, now: datetime.datetime
+    ) -> None:
         """«4 глаза» PAYOUT_PENDING→PAID (D6, FR-9.4): двое РАЗНЫХ сотрудников.
 
         Первый аппрув фиксирует actor_id (case_state остаётся PAYOUT_PENDING); второй
         (≠ первого) завершает переход в PAID. Тот же actor дважды → 409. Инвариант-гард
         (не отключается конфигом). Дубль-проверка на стороне releasePayout — seam E10-7.
+        При PAID для GUARANTEE фиксируется срок регресса (E10-6 #196) — `_record_regress_due_at`.
         """
         first = _payout_first_approver(ticket)
         if first is None:
@@ -324,6 +342,7 @@ class TicketActionService:
             )
         _clear_payout_first_approver(ticket)
         ticket.case_state = TicketCaseState.PAID.value
+        await self._record_regress_due_at(ticket, now=now)
         await self._session.flush()
         to_value: dict[str, object] = {
             "case_state": TicketCaseState.PAID.value,
@@ -338,3 +357,24 @@ class TicketActionService:
             from_value={"case_state": TicketCaseState.PAYOUT_PENDING.value},
             to_value=to_value,
         )
+
+    async def _record_regress_due_at(self, ticket: Ticket, *, now: datetime.datetime) -> None:
+        """Фиксация-seam: срок регресса 14 кал.дн при выплате GUARANTEE (Договор 5.8.8, Q4).
+
+        kb-support только ФИКСИРУЕТ срок (payload.regress_due_at) — реальное регрессное
+        обязательство/взыскание считает и ведёт платёжный контур (ADR-0013 D2/upstream,
+        `regress_obligation_id` ставит он же). Не-GUARANTEE — ничего не пишем.
+        """
+        if ticket.type != CaseType.GUARANTEE.value:
+            return
+        repo = TicketCaseDetailsRepository(self._session)
+        details = await repo.get_by_ticket(ticket.id)
+        regress_due_at = compute_regress_due_at(now).isoformat()
+        if details is None:
+            await repo.create(
+                ticket.id, CaseType.GUARANTEE, payload={"regress_due_at": regress_due_at}
+            )
+            return
+        payload = dict(details.payload or {})
+        payload["regress_due_at"] = regress_due_at
+        await repo.update_payload(details, payload)

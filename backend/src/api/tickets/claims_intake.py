@@ -19,6 +19,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.tickets.case_repository import TicketCaseDetailsRepository
+from api.tickets.claims_sla import compute_review_due_at
 from api.tickets.enums import ActKind, CaseType, TicketCaseState
 from api.tickets.models import Ticket
 
@@ -86,6 +87,10 @@ async def apply_claim_intake(
 
     ticket.case_state = TicketCaseState.CLAIM_SUBMITTED.value
     ticket.claim_amount = _parse_decimal(custom_fields.get(_AMOUNT_KEY))
+    # Срок рассмотрения 30 кал.дн (Договор 5.8.7, E10-6 #196, решение Архитектора Q3):
+    # пишем в resolution_due_at — так дедлайн подключается к breach-машине E4 (read-side
+    # #89 + worker #90). Переопределяет общий SLA-дедлайн (apply_sla отработал ДО intake).
+    ticket.resolution_due_at = compute_review_due_at(ticket.created_at)
 
     payload: dict[str, Any] = {}
     if case_type is CaseType.COMPENSATION:

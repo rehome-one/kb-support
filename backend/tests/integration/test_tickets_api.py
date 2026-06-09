@@ -9,6 +9,7 @@ JWT/сессионная валидация в #29). Заявки коммитя
 from __future__ import annotations
 
 import asyncio
+import datetime
 import itertools
 import os
 import time
@@ -1558,3 +1559,84 @@ def test_non_claims_ticket_has_no_case(client: TestClient) -> None:
     data = resp.json()["data"]
     assert data["case_state"] is None
     assert _get_case_details(data["id"]) is None
+
+
+# --- SLA claims по Договору (E10-6 #196) ---
+
+
+def test_claims_ticket_gets_30_calendar_day_review_deadline(client: TestClient) -> None:
+    # Срок рассмотрения 30 кал.дн (Договор 5.8.7) → resolution_due_at = created_at + 30 дней.
+    _use(_operator())
+    data = _create(client, type="COMPENSATION", channel="LK_CLAIM").json()["data"]
+    created = datetime.datetime.fromisoformat(data["created_at"])
+    review_due = datetime.datetime.fromisoformat(data["resolution_due_at"])
+    assert review_due - created == datetime.timedelta(days=30)
+
+
+def test_payout_pending_sets_payout_due_at(client: TestClient) -> None:
+    # Вход в PAYOUT_PENDING выставляет payout_due_at (10 раб.дн, Договор 5.8.8, Q2).
+    _use(_operator())
+    ticket_id = _create(client, type="COMPENSATION", channel="LK_CLAIM").json()["data"]["id"]
+    _set_case_state(ticket_id, "DECISION_MADE")
+    resp = _action(client, ticket_id, "case-state", case_state="PAYOUT_PENDING")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["case_state"] == "PAYOUT_PENDING"
+    payout_due = datetime.datetime.fromisoformat(data["payout_due_at"])
+    assert payout_due.weekday() < 5  # рабочий день (Пн–Пт)
+
+
+def test_guarantee_paid_records_regress_seam(client: TestClient) -> None:
+    # Выплата GUARANTEE (PAID) фиксирует срок регресса 14 кал.дн в payload (фиксация-seam, Q4).
+    op_a = _operator()
+    op_b = _operator()
+    _use(op_a)
+    ticket_id = _create(client, type="GUARANTEE", channel="LK_CLAIM").json()["data"]["id"]
+    _set_team(ticket_id, "support")  # оба оператора в SUPPORT → видят заявку
+    _set_case_state(ticket_id, "PAYOUT_PENDING")
+    assert _action(client, ticket_id, "case-state", case_state="PAID").status_code == 200  # 1-й
+    _use(op_b)
+    r2 = _action(client, ticket_id, "case-state", case_state="PAID")  # 2-й, другой
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["data"]["case_state"] == "PAID"
+    details = _get_case_details(ticket_id)
+    assert details is not None
+    payload = details["payload"]
+    assert isinstance(payload, dict)
+    assert "regress_due_at" in payload  # срок регресса зафиксирован (боевой путь — upstream)
+
+
+def _delete_case_details(ticket_id: str) -> None:
+    """Удалить TicketCaseDetails (для проверки defensive get-or-create регресс-seam)."""
+
+    async def _inner() -> None:
+        engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("DELETE FROM ticket_case_details WHERE ticket_id = :id"),
+                    {"id": uuid.UUID(ticket_id)},
+                )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_inner())
+
+
+def test_guarantee_regress_seam_creates_case_details_when_missing(client: TestClient) -> None:
+    # Defensive-ветка: деталей нет → регресс-seam создаёт их при PAID (get-or-create).
+    op_a = _operator()
+    op_b = _operator()
+    _use(op_a)
+    ticket_id = _create(client, type="GUARANTEE", channel="LK_CLAIM").json()["data"]["id"]
+    _delete_case_details(ticket_id)  # детали отсутствуют до выплаты
+    _set_team(ticket_id, "support")
+    _set_case_state(ticket_id, "PAYOUT_PENDING")
+    assert _action(client, ticket_id, "case-state", case_state="PAID").status_code == 200
+    _use(op_b)
+    assert _action(client, ticket_id, "case-state", case_state="PAID").status_code == 200
+    details = _get_case_details(ticket_id)
+    assert details is not None  # созданы заново
+    assert details["case_type"] == "GUARANTEE"
+    assert isinstance(details["payload"], dict)
+    assert "regress_due_at" in details["payload"]
