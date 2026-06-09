@@ -130,6 +130,16 @@ def test_exit_pause_without_resolution_due_at_only_accumulates() -> None:
     assert t.sla_paused_at is None
 
 
+def test_claims_ticket_not_paused() -> None:
+    # Claims-заявка (case_state задан): срок рассмотрения 30 кал.дн календарно-абсолютный
+    # (Договор 5.8.7, E10-6 #196) — паузами не двигается, sla_paused_at не ставится.
+    t = _ticket(TicketStatus.PENDING)
+    t.case_state = "CLAIM_SUBMITTED"
+    apply_pause_accounting(t, TicketStatus.OPEN.value, _T0)
+    assert t.sla_paused_at is None  # вход в паузу проигнорирован
+    assert t.resolution_due_at == _DUE
+
+
 def _set_status(ticket: Ticket, status: TicketStatus) -> Ticket:
     ticket.status = status.value
     return ticket

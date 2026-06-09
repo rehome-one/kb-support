@@ -19,6 +19,7 @@ import datetime
 
 from sqlalchemy import ColumnElement, and_, func, or_
 
+from api.tickets.enums import TicketCaseState
 from api.tickets.models import Ticket
 
 
@@ -44,4 +45,16 @@ def first_response_breached_clause(now: datetime.datetime) -> ColumnElement[bool
         Ticket.first_response_due_at.is_not(None),
         Ticket.first_responded_at.is_(None),
         Ticket.first_response_due_at <= now,
+    )
+
+
+def payout_breached_clause(now: datetime.datetime) -> ColumnElement[bool]:
+    """Дедлайн ВЫПЛАТЫ нарушен (claims, E10-6 #196; зеркало `is_payout_breached`).
+
+    Только пока заявка в PAYOUT_PENDING: после PAID `payout_due_at` уже не «висит».
+    """
+    return and_(
+        Ticket.case_state == TicketCaseState.PAYOUT_PENDING.value,
+        Ticket.payout_due_at.is_not(None),
+        Ticket.payout_due_at <= now,
     )

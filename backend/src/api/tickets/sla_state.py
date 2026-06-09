@@ -18,6 +18,8 @@ from __future__ import annotations
 import datetime
 from typing import Literal
 
+from api.tickets.enums import TicketCaseState
+
 SlaStateValue = Literal["none", "ok", "approaching", "breached"]
 
 # Доля окна (deadline − created_at), при остатке меньше которой состояние = approaching.
@@ -115,3 +117,17 @@ def is_first_response_breached(
     if first_response_due_at is None or first_responded_at is not None:
         return False
     return now >= first_response_due_at
+
+
+def is_payout_breached(
+    now: datetime.datetime,
+    *,
+    case_state: str | None,
+    payout_due_at: datetime.datetime | None,
+) -> bool:
+    """Нарушен ли дедлайн ВЫПЛАТЫ (claims, E10-6 #196). Зеркало `payout_breached_clause`.
+
+    Актуально только пока заявка в PAYOUT_PENDING (после PAID срок не «висит»)."""
+    if payout_due_at is None or case_state != TicketCaseState.PAYOUT_PENDING.value:
+        return False
+    return now >= payout_due_at
