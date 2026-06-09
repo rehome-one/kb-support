@@ -13,18 +13,14 @@
 
 from __future__ import annotations
 
-import time
-
 import httpx
 from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.clients.auth import StaticTokenProvider
 from api.clients.bank import HttpBankProviderClient, PayoutRequest
-from api.clients.base import ResilientHttpClient
-from api.clients.circuit_breaker import CircuitBreaker
+from api.clients.factory import build_resilient_client
 from api.clients.payment_checker import PaymentReleaseCheckerClient
-from api.clients.retry import RetryPolicy
 from api.config import Settings
 from api.observability.logging import get_logger
 from api.tickets.case_repository import TicketCaseDetailsRepository
@@ -75,22 +71,8 @@ async def dispatch_payout(request: PayoutRequest, settings: Settings) -> None:
         async with httpx.AsyncClient(
             base_url=settings.bank_provider_api_base_url, timeout=settings.client_timeout_seconds
         ) as http:
-            resilient = ResilientHttpClient(
-                client_name="bank",
-                http=http,
-                breaker=CircuitBreaker(
-                    failure_threshold=settings.client_breaker_failure_threshold,
-                    reset_timeout=settings.client_breaker_reset_timeout,
-                    now=time.monotonic,
-                ),
-                retry=RetryPolicy(
-                    attempts=settings.client_retry_attempts,
-                    base_delay=settings.client_retry_base_delay,
-                    max_delay=settings.client_retry_max_delay,
-                ),
-            )
             client = HttpBankProviderClient(
-                http_client=resilient,
+                http_client=build_resilient_client("bank", http, settings),
                 token_provider=StaticTokenProvider(settings.bank_provider_api_token),
             )
             result = await client.release_payout(request)

@@ -8,16 +8,13 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import AsyncIterator
 
 import httpx
 
 from api.clients.auth import StaticTokenProvider
-from api.clients.base import ResilientHttpClient
-from api.clients.circuit_breaker import CircuitBreaker
+from api.clients.factory import build_resilient_client
 from api.clients.payment_checker import HttpPaymentReleaseCheckerClient, PaymentReleaseCheckerClient
-from api.clients.retry import RetryPolicy
 from api.config import get_settings
 
 
@@ -32,22 +29,8 @@ async def get_payment_release_checker_client() -> AsyncIterator[PaymentReleaseCh
         base_url=settings.payment_release_checker_api_base_url,
         timeout=settings.client_timeout_seconds,
     ) as http:
-        resilient = ResilientHttpClient(
-            client_name="payment_checker",
-            http=http,
-            breaker=CircuitBreaker(
-                failure_threshold=settings.client_breaker_failure_threshold,
-                reset_timeout=settings.client_breaker_reset_timeout,
-                now=time.monotonic,
-            ),
-            retry=RetryPolicy(
-                attempts=settings.client_retry_attempts,
-                base_delay=settings.client_retry_base_delay,
-                max_delay=settings.client_retry_max_delay,
-            ),
-        )
         yield HttpPaymentReleaseCheckerClient(
-            http_client=resilient,
+            http_client=build_resilient_client("payment_checker", http, settings),
             # TODO(#77): dev/test-only провайдер; боевой ClientCredentials — #77.
             token_provider=StaticTokenProvider(settings.payment_release_checker_api_token),
         )

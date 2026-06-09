@@ -39,6 +39,10 @@ from api.notifications.dispatcher import (
     schedule_status_notification,
 )
 from api.tickets.actions import TicketActionService
+from api.tickets.decision_dispatch import (
+    maybe_schedule_decision_delivery,
+    maybe_schedule_ledger,
+)
 from api.tickets.enums import (
     TicketChannel,
     TicketPriority,
@@ -754,12 +758,15 @@ async def transition_case_state(
 async def decide_ticket(
     ticket_id: uuid.UUID,
     payload: DecisionInput,
+    background: BackgroundTasks,
     principal: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_session),
     x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
 ) -> TicketEnvelope:
     """E10-3 (#193, FR-9.3): решение FULL/PARTIAL/REJECTED. Связано с case_state (FULL/PARTIAL→
-    DECISION_MADE, REJECTED→REJECTED). Повтор→409. Гейт — claims-оператор (legal/finance, D3)."""
+    DECISION_MADE, REJECTED→REJECTED). Повтор→409. Гейт — claims-оператор (legal/finance, D3).
+    E10-7 PR-2 (#197): после решения — fire-after фиксация в ledger + доставка решения в ЛК
+    (оба config-gated, инертны до ops)."""
     ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
     if ticket is None:
         raise ProblemException.not_found(detail="Ticket not found")
@@ -773,4 +780,8 @@ async def decide_ticket(
     )
     await session.commit()
     await session.refresh(ticket)
+    # Fire-after после ответа: проводка-ссылка + доставка решения в ЛК (E10-7 PR-2).
+    settings = get_settings()
+    maybe_schedule_ledger(background, ticket, settings)
+    maybe_schedule_decision_delivery(background, ticket, settings)
     return _ticket_envelope(ticket, x_request_id)
