@@ -3456,20 +3456,24 @@ components:
           maxLength: 128
           description: Идентификатор сигнала платёжного контура (идемпотентность приёма).
         requester_id:
-          type: string
+          type:
+          - string
+          - 'null'
           format: uuid
-          nullable: true
         missed_payment_id:
-          type: string
+          type:
+          - string
+          - 'null'
           format: uuid
-          nullable: true
         regress_obligation_id:
-          type: string
+          type:
+          - string
+          - 'null'
           format: uuid
-          nullable: true
         late_fee_accrued:
-          type: number
-          nullable: true
+          type:
+          - number
+          - 'null'
           description: Начисленная плата за рассрочку — ССЫЛКА (kb-support не вычисляет, D2).
   responses:
     BadRequest:
