@@ -75,6 +75,8 @@ export type ResolveInput = BodyJson<"resolveTicket">;
 export type ReopenInput = BodyJson<"reopenTicket">;
 export type RateInput = BodyJson<"rateTicket">;
 export type CannedRenderInput = BodyJson<"renderCannedResponse">;
+export type DecisionInput = BodyJson<"decideTicket">;
+export type CaseStateTransitionInput = BodyJson<"transitionCaseState">;
 
 // --- Ядро запроса ----------------------------------------------------------
 
@@ -327,4 +329,28 @@ export function rateTicket(
   deps?: ApiFetchDeps,
 ): Promise<TicketResponse> {
   return request<TicketResponse>(`${ticketPath(id)}/rate`, "POST", { body: input, deps });
+}
+
+// --- Претензионные операции (E10, #201) ------------------------------------
+
+export function decideTicket(
+  id: string,
+  input: DecisionInput,
+  deps?: ApiFetchDeps,
+): Promise<TicketResponse> {
+  // Idempotency-Key (контракт): безопасный повтор решения — сервер дедуплицирует реплей.
+  return request<TicketResponse>(`${ticketPath(id)}/decision`, "POST", {
+    body: input,
+    idempotencyKey: crypto.randomUUID(),
+    deps,
+  });
+}
+
+export function transitionCaseState(
+  id: string,
+  input: CaseStateTransitionInput,
+  deps?: ApiFetchDeps,
+): Promise<TicketResponse> {
+  // Контракт не объявляет Idempotency-Key для перехода case_state — не шлём.
+  return request<TicketResponse>(`${ticketPath(id)}/case-state`, "POST", { body: input, deps });
 }

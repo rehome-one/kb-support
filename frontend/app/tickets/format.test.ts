@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ACT_KIND_LABELS,
   AUTHOR_TYPE_LABELS,
+  CASE_STATE_LABELS,
+  DECISION_LABELS,
   HISTORY_ACTION_LABELS,
+  SIGNING_STATUS_LABELS,
   SLA_STATE_LABELS,
   STATUS_LABELS,
   formatDateTime,
   formatHistoryDiff,
+  formatScalar,
+  isClaimType,
   label,
   shortId,
   slaStateClass,
@@ -80,6 +86,51 @@ describe("доменные лейблы карточки", () => {
   it("HISTORY_ACTION_LABELS содержит 9 действий контракта", () => {
     expect(Object.keys(HISTORY_ACTION_LABELS)).toHaveLength(9);
     expect(label(HISTORY_ACTION_LABELS, "status_changed")).toBe("Смена статуса");
+  });
+});
+
+describe("претензионные лейблы (E10, #201)", () => {
+  it("CASE_STATE_LABELS покрывает все 8 состояний разбирательства", () => {
+    expect(Object.keys(CASE_STATE_LABELS)).toHaveLength(8);
+    expect(label(CASE_STATE_LABELS, "UNDER_REVIEW")).toBe("На рассмотрении");
+    expect(label(CASE_STATE_LABELS, "PAID")).toBe("Выплачено");
+  });
+
+  it("DECISION_LABELS покрывает 3 вердикта", () => {
+    expect(Object.keys(DECISION_LABELS)).toEqual(["FULL", "PARTIAL", "REJECTED"]);
+    expect(label(DECISION_LABELS, "PARTIAL")).toBe("Частичное удовлетворение");
+  });
+
+  it("ACT_KIND_LABELS и SIGNING_STATUS_LABELS покрывают домен", () => {
+    expect(label(ACT_KIND_LABELS, "MOVE_OUT")).toBe("Акт выселения");
+    expect(label(SIGNING_STATUS_LABELS, "both_signed")).toBe("Подписан обеими сторонами");
+  });
+
+  it("label фолбэчит на «—» для null case_state", () => {
+    expect(label(CASE_STATE_LABELS, null)).toBe("—");
+  });
+});
+
+describe("isClaimType", () => {
+  it("истинно для всех claims-типов", () => {
+    for (const t of ["COMPENSATION", "GUARANTEE", "INSURANCE", "ACCEPTANCE_ACT"]) {
+      expect(isClaimType(t)).toBe(true);
+    }
+  });
+
+  it("ложно для обычных типов и пустого значения", () => {
+    expect(isClaimType("PAYMENT")).toBe(false);
+    expect(isClaimType(null)).toBe(false);
+    expect(isClaimType(undefined)).toBe(false);
+  });
+});
+
+describe("formatScalar (нейтральный рендер payload)", () => {
+  it("примитивы → строка, объекты → JSON, null → ∅", () => {
+    expect(formatScalar(42)).toBe("42");
+    expect(formatScalar("x")).toBe("x");
+    expect(formatScalar(null)).toBe("∅");
+    expect(formatScalar({ a: 1 })).toBe('{"a":1}');
   });
 });
 

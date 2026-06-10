@@ -169,7 +169,7 @@ export const HISTORY_ACTION_LABELS: Record<string, string> = {
   rated: "Оценка",
 };
 
-function formatScalar(value: unknown): string {
+export function formatScalar(value: unknown): string {
   if (value === null || value === undefined) return "∅";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
@@ -217,4 +217,48 @@ const SLA_STATE_CLASSES: Record<string, string> = {
 /** Tailwind-класс цвета для состояния SLA; нейтральный для неизвестного/none. */
 export function slaStateClass(state: string | null | undefined): string {
   return (state && SLA_STATE_CLASSES[state]) || "text-gray-400";
+}
+
+// --- Претензионные типы (E10, #201). Домены — наш OpenAPI (фиксированы контрактом). ---
+
+export const CASE_STATE_LABELS: Record<string, string> = {
+  CLAIM_SUBMITTED: "Претензия подана",
+  DOCS_PENDING: "Ждём документы",
+  UNDER_REVIEW: "На рассмотрении",
+  INSPECTION: "Осмотр",
+  DECISION_MADE: "Решение принято",
+  PAYOUT_PENDING: "Ожидает выплаты",
+  PAID: "Выплачено",
+  REJECTED: "Отклонена",
+};
+
+export const DECISION_LABELS: Record<string, string> = {
+  FULL: "Полное удовлетворение",
+  PARTIAL: "Частичное удовлетворение",
+  REJECTED: "Отказ",
+};
+
+export const ACT_KIND_LABELS: Record<string, string> = {
+  MOVE_IN: "Акт заселения",
+  MOVE_OUT: "Акт выселения",
+};
+
+export const SIGNING_STATUS_LABELS: Record<string, string> = {
+  one_signed: "Подписан одной стороной",
+  both_signed: "Подписан обеими сторонами",
+  disputed: "Оспаривается",
+};
+
+// Претензионные типы заявок (§3.1.1). Наличие claims-секции на карточке определяется
+// типом заявки (канонический признак ТЗ), а не косвенными полями (case_state может быть null).
+const CLAIM_TYPES: ReadonlySet<string> = new Set([
+  "COMPENSATION",
+  "GUARANTEE",
+  "INSURANCE",
+  "ACCEPTANCE_ACT",
+]);
+
+/** Является ли заявка претензионной (E10) — по её типу. */
+export function isClaimType(type: string | null | undefined): boolean {
+  return type != null && CLAIM_TYPES.has(type);
 }
