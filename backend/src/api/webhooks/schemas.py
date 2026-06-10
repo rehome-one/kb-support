@@ -12,6 +12,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
+from api.tickets.enums import InsurerDecision
 from api.webhooks.enums import WebhookEvent
 
 
@@ -63,15 +64,20 @@ class WebhookSubscriptionCreatedEnvelope(BaseModel):
 
 
 class InsurerEventIngest(BaseModel):
-    """Тело inbound webhook страховщика (E10-8 PR-C, провизорно — ADR-0015 D8).
+    """Тело inbound webhook страховщика (E10-8 PR-C #198 / E10-10 PR-C #200, провизорно).
 
-    `ticket_number` — наш человекочитаемый номer заявки (страховщик знал его из outbound);
-    `insurance_event_id` — id страхового события на стороне страховщика. Лишние поля запрещены."""
+    `ticket_number` — наш человекочитаемый номер заявки (страховщик знал его из outbound);
+    `insurance_event_id` — id страхового события на стороне страховщика. **E10-10 (ADR-0017 D2):**
+    опц. `insurer_status` (статусный лейбл страховщика → `InsurancePayload.insurer_status`) и
+    `insurer_decision` (вердикт → системный сдвиг case_state). Оба опциональны — обратная
+    совместимость с чистым приёмом E10-8. Лишние поля запрещены."""
 
     model_config = ConfigDict(extra="forbid")
 
     ticket_number: str = Field(min_length=1, max_length=64)
     insurance_event_id: uuid.UUID
+    insurer_status: str | None = Field(default=None, min_length=1, max_length=128)
+    insurer_decision: InsurerDecision | None = None
 
 
 class GuaranteeEventIngest(BaseModel):

@@ -153,6 +153,19 @@ class TicketDecision(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
+class InsurerDecision(str, enum.Enum):
+    """Вердикт страховщика по INSURANCE-заявке (provisional contract, ADR-0017 D2).
+
+    Решение по выплате — за страховщиком (FR-9.6, §3.3.3); kb-support лишь ФИКСИРУЕТ его и
+    системно двигает case_state по машине E10-2: APPROVED → DECISION_MADE, REJECTED → REJECTED.
+    Это НЕ наш внутренний вердикт (`TicketDecision`/`decide()`) — `ticket.decision` не трогаем.
+    Точные значения upstream-контракта страховщика не зафиксированы — провизорный минимум
+    (без PARTIAL: деньги/суммы не считаем, FR-9.8); расширение — follow-up при боевом контракте."""
+
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
 class ActKind(str, enum.Enum):
     """Тип акта приёма-передачи (§3.3.4). MOVE_OUT+ущерб → каскад COMPENSATION (D9, E10-9)."""
 

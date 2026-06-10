@@ -3441,6 +3441,22 @@ components:
           type: string
           format: uuid
           description: Идентификатор страхового события на стороне страховщика.
+        insurer_status:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >-
+            Статусный лейбл на стороне страховщика (provisional, ADR-0017 D2). Фиксируется в
+            InsurancePayload.insurer_status. Опционален.
+        insurer_decision:
+          type: string
+          enum:
+          - APPROVED
+          - REJECTED
+          description: >-
+            Вердикт страховщика (provisional, ADR-0017 D2). Системно двигает case_state по машине
+            E10-2: APPROVED → DECISION_MADE, REJECTED → REJECTED. Не применяет наш decision.
+            Опционален.
     GuaranteeEventIngest:
       type: object
       required:

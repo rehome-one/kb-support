@@ -25,6 +25,7 @@ from api.auth.principal import Principal, PrincipalKind
 from api.config import get_settings
 from api.db import get_session
 from api.main import app
+from api.tickets.case_repository import TicketCaseDetailsRepository
 from api.tickets.enums import TicketTeam
 from api.webhooks.events import WebhookDelivery
 from api.webhooks.signing import compute_signature
@@ -186,3 +187,235 @@ def test_valid_sets_event_and_triggers_outbound(
     repeat = client.post(_INSURER_EVENTS, content=raw, headers=headers)
     assert repeat.status_code == 202
     assert len(captured) == before, "повтор того же insurance_event_id не должен ретриггерить"
+
+
+# --- E10-10 PR-C (#200): вердикт страховщика → insurer_status + системный case_state (D2) ---
+
+
+def _to_under_review(client: TestClient, ticket_id: str) -> None:
+    """Перевести claims-заявку CLAIM_SUBMITTED → UNDER_REVIEW оператором (для вердикта)."""
+    _use(_OPERATOR)
+    resp = client.post(
+        f"/api/v1/support/tickets/{ticket_id}/case-state", json={"case_state": "UNDER_REVIEW"}
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def _ticket_id_by_number(client: TestClient, number: str) -> str:
+    _use(_OPERATOR)
+    listing = client.get("/api/v1/support/tickets", params={"limit": 100})
+    assert listing.status_code == 200, listing.text
+    for item in listing.json()["data"]:
+        if str(item["number"]) == number:
+            return str(item["id"])
+    raise AssertionError(f"ticket {number} not found")
+
+
+def _get_ticket(client: TestClient, ticket_id: str) -> dict[str, object]:
+    _use(_OPERATOR)
+    resp = client.get(f"/api/v1/support/tickets/{ticket_id}")
+    assert resp.status_code == 200, resp.text
+    return dict(resp.json()["data"])
+
+
+def test_backward_compatible_without_verdict_fields(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E10-8 чистый приём (только insurance_event_id) работает без новых полей."""
+    monkeypatch.setattr("api.webhooks.dispatcher.deliver_webhook", _noop_deliver)
+    _enable_secret(monkeypatch)
+    number = _create_insurance_claim(client)
+    _use(_SERVICE)
+    raw, headers = _signed({"ticket_number": number, "insurance_event_id": str(uuid.uuid4())})
+    resp = client.post(_INSURER_EVENTS, content=raw, headers=headers)
+    assert resp.status_code == 202, resp.text
+    # case_state не сдвинут вердиктом (его нет) — остался CLAIM_SUBMITTED.
+    assert resp.json()["data"]["case_state"] == "CLAIM_SUBMITTED"
+
+
+def test_verdict_approved_moves_case_state_without_our_decision(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """APPROVED из UNDER_REVIEW → DECISION_MADE; ticket.decision НЕ трогается (D2)."""
+    monkeypatch.setattr("api.webhooks.dispatcher.deliver_webhook", _noop_deliver)
+    _enable_secret(monkeypatch)
+    number = _create_insurance_claim(client)
+    ticket_id = _ticket_id_by_number(client, number)
+    _to_under_review(client, ticket_id)
+
+    _use(_SERVICE)
+    raw, headers = _signed(
+        {
+            "ticket_number": number,
+            "insurance_event_id": str(uuid.uuid4()),
+            "insurer_status": "approved_by_insurer",
+            "insurer_decision": "APPROVED",
+        }
+    )
+    resp = client.post(_INSURER_EVENTS, content=raw, headers=headers)
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["data"]["case_state"] == "DECISION_MADE"
+    data = _get_ticket(client, ticket_id)
+    assert data["decision"] is None, "наш decide() НЕ применяется на вердикт страховщика (D2)"
+
+
+def test_verdict_rejected_moves_to_rejected(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("api.webhooks.dispatcher.deliver_webhook", _noop_deliver)
+    _enable_secret(monkeypatch)
+    number = _create_insurance_claim(client)
+    ticket_id = _ticket_id_by_number(client, number)
+    _to_under_review(client, ticket_id)
+
+    _use(_SERVICE)
+    raw, headers = _signed(
+        {
+            "ticket_number": number,
+            "insurance_event_id": str(uuid.uuid4()),
+            "insurer_decision": "REJECTED",
+        }
+    )
+    resp = client.post(_INSURER_EVENTS, content=raw, headers=headers)
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["data"]["case_state"] == "REJECTED"
+
+
+def test_status_only_saved_without_state_change(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Только insurer_status (без decision) → сохранён в payload, case_state не двигается."""
+    monkeypatch.setattr("api.webhooks.dispatcher.deliver_webhook", _noop_deliver)
+    _enable_secret(monkeypatch)
+    number = _create_insurance_claim(client)
+    ticket_id = _ticket_id_by_number(client, number)
+    _to_under_review(client, ticket_id)
+
+    _use(_SERVICE)
+    raw, headers = _signed(
+        {
+            "ticket_number": number,
+            "insurance_event_id": str(uuid.uuid4()),
+            "insurer_status": "in_progress_at_insurer",
+        }
+    )
+    resp = client.post(_INSURER_EVENTS, content=raw, headers=headers)
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["data"]["case_state"] == "UNDER_REVIEW", "статус не двигает case_state"
+    assert _insurer_status_in_payload(ticket_id) == "in_progress_at_insurer"
+
+
+def test_illegal_verdict_transition_warns_keeps_state_but_saves_status(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Вердикт из CLAIM_SUBMITTED (скачок в DECISION_MADE запрещён) → 202, case_state не изменён,
+    но insurer_status сохранён (упавший inbound = потеря доставки, поэтому НЕ 422)."""
+    monkeypatch.setattr("api.webhooks.dispatcher.deliver_webhook", _noop_deliver)
+    _enable_secret(monkeypatch)
+    number = _create_insurance_claim(client)  # остаётся CLAIM_SUBMITTED
+    ticket_id = _ticket_id_by_number(client, number)
+
+    _use(_SERVICE)
+    raw, headers = _signed(
+        {
+            "ticket_number": number,
+            "insurance_event_id": str(uuid.uuid4()),
+            "insurer_status": "approved_by_insurer",
+            "insurer_decision": "APPROVED",
+        }
+    )
+    resp = client.post(_INSURER_EVENTS, content=raw, headers=headers)
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["data"]["case_state"] == "CLAIM_SUBMITTED", "запрещённый сдвиг не применён"
+    assert _insurer_status_in_payload(ticket_id) == "approved_by_insurer"
+
+
+def test_verdict_replay_same_event_id_is_noop(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Повтор того же insurance_event_id с вердиктом → early-return, без повторного сдвига."""
+    monkeypatch.setattr("api.webhooks.dispatcher.deliver_webhook", _noop_deliver)
+    _enable_secret(monkeypatch)
+    number = _create_insurance_claim(client)
+    ticket_id = _ticket_id_by_number(client, number)
+    _to_under_review(client, ticket_id)
+
+    event_id = str(uuid.uuid4())
+    _use(_SERVICE)
+    raw, headers = _signed(
+        {"ticket_number": number, "insurance_event_id": event_id, "insurer_decision": "REJECTED"}
+    )
+    first = client.post(_INSURER_EVENTS, content=raw, headers=headers)
+    assert first.status_code == 202
+    assert first.json()["data"]["case_state"] == "REJECTED"
+    # Повтор той же доставки — идемпотентный no-op (тот же event_id), состояние стабильно.
+    repeat = client.post(_INSURER_EVENTS, content=raw, headers=headers)
+    assert repeat.status_code == 202
+    assert repeat.json()["data"]["case_state"] == "REJECTED"
+
+
+def test_status_stored_when_case_details_missing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Защитная create-ветка: если TicketCaseDetails отсутствует, insurer_status создаёт детали
+    (а не падает). При интейке детали есть, поэтому удаляем их напрямую перед приёмом."""
+    monkeypatch.setattr("api.webhooks.dispatcher.deliver_webhook", _noop_deliver)
+    _enable_secret(monkeypatch)
+    number = _create_insurance_claim(client)
+    ticket_id = _ticket_id_by_number(client, number)
+    _delete_case_details(ticket_id)
+
+    _use(_SERVICE)
+    raw, headers = _signed(
+        {
+            "ticket_number": number,
+            "insurance_event_id": str(uuid.uuid4()),
+            "insurer_status": "created_from_verdict",
+        }
+    )
+    resp = client.post(_INSURER_EVENTS, content=raw, headers=headers)
+    assert resp.status_code == 202, resp.text
+    assert _insurer_status_in_payload(ticket_id) == "created_from_verdict"
+
+
+async def _noop_deliver(url: str, secret: str, delivery: object, settings: object) -> None:
+    return None
+
+
+def _delete_case_details(ticket_id: str) -> None:
+    """Удалить TicketCaseDetails заявки напрямую (NullPool) — для покрытия create-ветки."""
+
+    async def _run() -> None:
+        engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        try:
+            async with factory() as session:
+                repo = TicketCaseDetailsRepository(session)
+                details = await repo.get_by_ticket(uuid.UUID(ticket_id))
+                if details is not None:
+                    await session.delete(details)
+                    await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+def _insurer_status_in_payload(ticket_id: str) -> str | None:
+    """Прочитать InsurancePayload.insurer_status напрямую из БД (NullPool)."""
+
+    async def _read() -> str | None:
+        engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        try:
+            async with factory() as session:
+                repo = TicketCaseDetailsRepository(session)
+                details = await repo.get_by_ticket(uuid.UUID(ticket_id))
+                if details is None:
+                    return None
+                value = (details.payload or {}).get("insurer_status")
+                return str(value) if value is not None else None
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_read())
