@@ -188,7 +188,13 @@ function DecisionForm({
           className={fieldClass}
           disabled={pending}
           value={decision}
-          onChange={(e) => setDecision(e.target.value)}
+          onChange={(e) => {
+            // Сброс зависимых полей при смене вердикта — иначе стейл-значение (напр. сумма,
+            // введённая для FULL) ушло бы с REJECTED. Обязательность пересчитывается ниже.
+            setDecision(e.target.value);
+            setAmount("");
+            setReason("");
+          }}
         >
           <option value="">— выбрать —</option>
           {Object.keys(DECISION_LABELS).map((d) => (

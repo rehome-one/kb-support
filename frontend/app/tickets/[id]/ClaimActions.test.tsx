@@ -114,6 +114,15 @@ describe("ClaimActions — решение", () => {
     );
   });
 
+  it("смена вердикта сбрасывает сумму и мотивировку (нет стейл-значений)", () => {
+    renderActions();
+    fireEvent.change(screen.getByLabelText("Вердикт"), { target: { value: "FULL" } });
+    fireEvent.change(screen.getByLabelText(/Одобренная сумма/), { target: { value: "50000" } });
+    fireEvent.change(screen.getByLabelText("Вердикт"), { target: { value: "REJECTED" } });
+    expect((screen.getByLabelText(/Одобренная сумма/) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(/Мотивировка/) as HTMLInputElement).value).toBe("");
+  });
+
   it("ошибка action (409/422) показывается как title без detail", async () => {
     const p = renderActions(
       {},
