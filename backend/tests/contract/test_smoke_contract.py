@@ -194,6 +194,24 @@ def test_get_ticket_exposes_allowed_case_transitions(operator_client: TestClient
 
 
 @requires_postgres
+def test_get_ticket_exposes_case_details_for_claim(operator_client: TestClient) -> None:
+    """getTicket отдаёт case_details для claims-заявки (#234); конформно TicketCaseDetails."""
+    created = operator_client.post(
+        "/api/v1/support/tickets", json={"subject": "claim", "type": "COMPENSATION"}
+    )
+    assert created.status_code == 201
+    ticket_id = created.json()["data"]["id"]
+
+    resp = operator_client.get(f"/api/v1/support/tickets/{ticket_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    # Поле optional, у Ticket нет additionalProperties:false — проверяем присутствие явно.
+    assert body["data"]["case_details"] is not None
+    assert body["data"]["case_details"]["case_type"] == "COMPENSATION"
+    assert_response_conforms("/api/v1/support/tickets/{id}", "get", "200", body)
+
+
+@requires_postgres
 def test_assign_accepts_documented_body(operator_client: TestClient) -> None:
     """assign принимает задокументированное тело {assignee_id} и conform'ит Ticket."""
     created = operator_client.post(

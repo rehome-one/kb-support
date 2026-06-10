@@ -233,13 +233,12 @@ def test_requester_sees_own_decision_values(client: TestClient) -> None:
 # --- Группа 4: доступ к доказательствам (evidence, §3.3.1) -------------------
 
 
-def test_evidence_not_reachable_by_outsider(client: TestClient) -> None:
-    """§3.3.1: доказательства (case_details.payload.evidence) недостижимы постороннему.
+def test_evidence_visible_to_owner_not_to_outsider(client: TestClient) -> None:
+    """§3.3.1: доказательства (case_details.payload.evidence) видны владельцу, не постороннему.
 
-    Evidence хранится в `ticket_case_details.payload` и доступно только через заявку
-    (отдельного per-evidence ACL нет — подтверждено кодом). Посторонний не видит заявку
-    → 404, доказательства не пересекают границу. (Сериализация `case_details` в read —
-    отдельная функциональная находка, follow-up #234; здесь проверяется security-граница.)
+    С #234 `case_details` сериализуется в read; доступ — через storage-level границу заявки
+    (отдельного per-evidence ACL нет). Владелец видит evidence; посторонний → 404, evidence
+    не пересекает границу.
     """
     owner = _requester()
     _use(owner)
@@ -248,14 +247,53 @@ def test_evidence_not_reachable_by_outsider(client: TestClient) -> None:
         "UPDATE ticket_case_details SET payload = CAST(:p AS jsonb) WHERE ticket_id = :id",
         {"p": '{"evidence": ["secret-photo-evidence-ref"]}', "id": uuid.UUID(ticket_id)},
     )
-    # Владелец видит свою заявку (граница доступа открыта владельцу).
-    assert client.get(f"/api/v1/support/tickets/{ticket_id}").status_code == 200
+    # Владелец видит evidence в case_details.payload (#234).
+    owner_view = client.get(f"/api/v1/support/tickets/{ticket_id}")
+    assert owner_view.status_code == 200
+    assert owner_view.json()["data"]["case_details"]["payload"]["evidence"] == [
+        "secret-photo-evidence-ref"
+    ]
 
     # Посторонний — 404; ссылка на доказательство не утекает ни в тело, ни в ошибку.
     _use(_requester())
     outsider = client.get(f"/api/v1/support/tickets/{ticket_id}")
     assert outsider.status_code == 404
     assert "secret-photo-evidence-ref" not in outsider.text
+
+
+def test_case_details_serialized_for_claims_not_for_regular(client: TestClient) -> None:
+    """#234: case_details наполняется для claims-заявки (case_type/payload) и null для обычной."""
+    _use(_operator(TicketTeam.LEGAL))
+    claim_id = _create(client).json()["data"]["id"]  # COMPENSATION
+    details = client.get(f"/api/v1/support/tickets/{claim_id}").json()["data"]["case_details"]
+    assert details is not None
+    assert details["case_type"] == "COMPENSATION"
+    assert details["ticket_id"] == claim_id
+    assert isinstance(details["payload"], dict)
+
+    regular = client.post(
+        "/api/v1/support/tickets", json={"subject": "обычная", "type": "PAYMENT"}
+    ).json()["data"]["id"]
+    assert client.get(f"/api/v1/support/tickets/{regular}").json()["data"]["case_details"] is None
+
+
+def test_case_details_redaction_preserved_for_requester(client: TestClient) -> None:
+    """#234+#202: наполнение case_details НЕ ломает редакцию служебных custom_fields-ключей."""
+    owner = _requester()
+    _use(owner)
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_team(ticket_id, "support")
+    _set_case_state(ticket_id, "PAYOUT_PENDING")
+    op = _operator()
+    _use(op)
+    assert _case_state(client, ticket_id, case_state="PAID").status_code == 200
+
+    _use(owner)
+    data = client.get(f"/api/v1/support/tickets/{ticket_id}").json()["data"]
+    # case_details наполнен, но служебный approver-ключ по-прежнему скрыт от заявителя.
+    assert data["case_details"] is not None
+    assert "payout_first_approver" not in str(data["custom_fields"])
+    assert str(op.user_id) not in str(data["custom_fields"])
 
 
 # --- Группа 5: ФЗ-152 — Problem.detail без ПДн/финданных --------------------
