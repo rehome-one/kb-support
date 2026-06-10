@@ -12,16 +12,22 @@ import {
   listMessages,
 } from "@/lib/api/client";
 
+import { isClaimType } from "../format";
+
 import {
   assignAction,
   closeAction,
   createMessageAction,
+  decideAction,
   escalateAction,
   patchTicketAction,
   renderCannedAction,
   reopenAction,
   resolveAction,
+  transitionCaseStateAction,
 } from "./actions";
+import { ClaimActions } from "./ClaimActions";
+import { ClaimPanel } from "./ClaimPanel";
 import { HistoryTimeline } from "./HistoryTimeline";
 import { MessageComposer } from "./MessageComposer";
 import { MessageThread } from "./MessageThread";
@@ -164,6 +170,19 @@ export default async function TicketCardPage({ params }: { params: { id: string 
         closeAction={closeAction}
         reopenAction={reopenAction}
       />
+      {/* Претензионный блок (E10, #201) — только для claims-типов; case_state/решение/
+          выплата приходят в getTicket, отдельный fetch не нужен. */}
+      {isClaimType(ticket.type) && (
+        <>
+          <ClaimPanel ticket={ticket} />
+          <ClaimActions
+            ticket={ticket}
+            decideAction={decideAction}
+            transitionCaseStateAction={transitionCaseStateAction}
+          />
+        </>
+      )}
+
       <RequesterContext ticket={ticket} result={requesterContext} />
 
       <Section title="Переписка">

@@ -7,12 +7,16 @@ import {
   assignTicket,
   closeTicket,
   createMessage,
+  decideTicket,
   escalateTicket,
   renderCannedResponse,
   reopenTicket,
   resolveTicket,
+  transitionCaseState,
   updateTicket,
   type AssignInput,
+  type CaseStateTransitionInput,
+  type DecisionInput,
   type EscalateInput,
   type MessageCreateInput,
   type ReopenInput,
@@ -77,6 +81,20 @@ export async function createMessageAction(
   input: MessageCreateInput,
 ): Promise<ActionResult> {
   return run(id, () => createMessage(id, input));
+}
+
+// Претензионные мутации (E10, #201). Бэкенд решает права (decision — legal/finance;
+// case-state — оператор): видимость форм на фронте не подменяет RBAC. Любой статус
+// ошибки (403/404/409/422) пересекает границу только как {status,title} (ФЗ-152).
+export async function decideAction(id: string, input: DecisionInput): Promise<ActionResult> {
+  return run(id, () => decideTicket(id, input));
+}
+
+export async function transitionCaseStateAction(
+  id: string,
+  input: CaseStateTransitionInput,
+): Promise<ActionResult> {
+  return run(id, () => transitionCaseState(id, input));
 }
 
 // Рендер шаблона для заявки (#131): подстановка переменных на сервере (ПДн — на сервере),
