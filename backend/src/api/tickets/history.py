@@ -44,6 +44,8 @@ class TicketHistoryAction(str, enum.Enum):
     INSURANCE_EVENT_RECEIVED = "insurance_event_received"  # E10-8 PR-C #198 (inbound страховщик)
     ACCEPTANCE_ACT_RECORDED = "acceptance_act_recorded"  # E10-9 PR-B #199 (акт + резолв signing)
     ACCEPTANCE_CASCADE_CREATED = "acceptance_cascade_created"  # E10-9 PR-C #199 (каскад)
+    GUARANTEE_EVENT_RECEIVED = "guarantee_event_received"  # E10-10 PR-A #200 (системный GUARANTEE)
+    INSURER_VERDICT_RECEIVED = "insurer_verdict_received"  # E10-10 PR-C #200 (вердикт страховщика)
 
 
 class TicketHistory(Base):

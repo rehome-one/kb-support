@@ -258,6 +258,28 @@ class Settings(BaseSettings):
         description="Допуск рассинхрона timestamp подписи webhook, сек (anti-replay, ADR-0015 D3).",
     )
 
+    # --- GUARANTEE/INSURANCE upstream (E10-10, #200, ADR-0017). guarantee_inbound_secret —
+    # HMAC приёма сигнала об исключениях от платёжного контура (fail-closed, отдельный
+    # контрагент). insurer_api_* — исходящая передача события в страховую (PR-B). Пусто=off. ---
+    guarantee_inbound_secret: str = Field(
+        default="",
+        description=(
+            "Секрет HMAC для верификации сигнала платёжного контура о гарантийном исключении. "
+            "ПУСТО → приём отклоняется (fail-closed). ADR-0017 D1."
+        ),
+    )
+    insurer_api_base_url: str = Field(
+        default="http://localhost:8094",
+        description="Базовый URL страховщика (передача события, E10-10 PR-B). ADR-0014/0017.",
+    )
+    insurer_api_token: str = Field(
+        default="",
+        description=(
+            "m2m-токен страховщика (dev/test). ПУСТО → передача события выключена (fire-after "
+            "не планируется). Реальный ClientCredentials — #77."
+        ),
+    )
+
     # --- SLA-воркер (E4-6, #90, ADR-0007 Решение 1). Dramatiq-actor проактивно
     # сканирует БД по дедлайнам и дёргает breach-хук (seam под эскалацию E5/#18).
     # ПУСТОЙ sla_worker_broker_url = выключено (StubBroker, actor инертен) — тот же

@@ -1659,6 +1659,39 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/guarantee-events:
+    post:
+      tags:
+      - Webhooks
+      summary: Приём сигнала гарантийного исключения (inbound)
+      description: >-
+        Inbound от платёжного контура (m2m kind=SERVICE + HMAC X-Signature). При исключении
+        (мошенничество/просрочка регресса/приостановка) системно создаёт GUARANTEE-тикет
+        (channel=SYSTEM→finance) и фиксирует регресс-ссылки. Идемпотентность по reference.
+        Провизорный контракт (ADR-0017 D1) — уточняется при провижининге.
+      operationId: createGuaranteeEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuaranteeEventIngest'
+      responses:
+        '202':
+          description: Принято
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 components:
   securitySchemes:
     BearerAuth:
@@ -3408,6 +3441,40 @@ components:
           type: string
           format: uuid
           description: Идентификатор страхового события на стороне страховщика.
+    GuaranteeEventIngest:
+      type: object
+      required:
+      - exception_kind
+      - reference
+      properties:
+        exception_kind:
+          type: string
+          maxLength: 64
+          description: Тип исключения (мошенничество/просрочка регресса/приостановка, 5.7.6/7/8).
+        reference:
+          type: string
+          maxLength: 128
+          description: Идентификатор сигнала платёжного контура (идемпотентность приёма).
+        requester_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        missed_payment_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        regress_obligation_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        late_fee_accrued:
+          type:
+          - number
+          - 'null'
+          description: Начисленная плата за рассрочку — ССЫЛКА (kb-support не вычисляет, D2).
   responses:
     BadRequest:
       description: Некорректный запрос

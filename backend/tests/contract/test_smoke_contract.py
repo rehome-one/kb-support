@@ -26,6 +26,7 @@ def test_spec_loads_and_has_core_paths() -> None:
     assert "/api/v1/support/stats" in SPEC["paths"]
     assert "/api/v1/support/insurer-events" in SPEC["paths"]
     assert "/api/v1/support/tickets/{id}/acceptance-act" in SPEC["paths"]
+    assert "/api/v1/support/guarantee-events" in SPEC["paths"]
     for schema in (
         "Ticket",
         "TicketSummary",
@@ -37,6 +38,7 @@ def test_spec_loads_and_has_core_paths() -> None:
         "SupportStats",
         "InsurerEventIngest",
         "AcceptanceActInput",
+        "GuaranteeEventIngest",
     ):
         assert schema in SPEC["components"]["schemas"]
 
@@ -628,6 +630,36 @@ def test_record_acceptance_act_response_conforms(operator_client: TestClient) ->
     assert_response_conforms(
         "/api/v1/support/tickets/{id}/acceptance-act", "post", "200", resp.json()
     )
+
+
+@requires_postgres
+def test_guarantee_event_response_conforms(
+    service_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AT-002 (#200 PR-A): createGuaranteeEvent (202) соответствует Ticket."""
+    import datetime
+    import json as _json
+
+    from api.config import get_settings
+    from api.webhooks.signing import compute_signature
+
+    secret = "contract-guarantee-secret-12345"
+    replacement = get_settings().model_copy(update={"guarantee_inbound_secret": secret})
+    monkeypatch.setattr("api.webhooks.guarantee_inbound.get_settings", lambda: replacement)
+
+    raw = _json.dumps(
+        {"exception_kind": "fraud", "reference": f"contract-{uuid.uuid4().hex}"}
+    ).encode()
+    ts = int(datetime.datetime.now(datetime.UTC).timestamp())
+    sig = f"t={ts},v1={compute_signature(payload=raw, secret=secret, timestamp=ts)}"
+    resp = service_client.post(
+        "/api/v1/support/guarantee-events",
+        content=raw,
+        headers={"Content-Type": "application/json", "X-Signature": sig},
+    )
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["data"]["type"] == "GUARANTEE"
+    assert_response_conforms("/api/v1/support/guarantee-events", "post", "202", resp.json())
 
 
 def test_prism_mock_serves_tickets(prism_mock: str) -> None:
