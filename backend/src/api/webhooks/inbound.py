@@ -27,6 +27,7 @@ from api.config import get_settings
 from api.db import get_session
 from api.errors import ProblemException
 from api.observability.logging import get_logger
+from api.tickets.actions import resolve_on_terminal_case
 from api.tickets.case_repository import TicketCaseDetailsRepository
 from api.tickets.case_state_machine import is_allowed_case_transition
 from api.tickets.enums import CaseType, InsurerDecision, TicketCaseState, TicketType
@@ -187,6 +188,10 @@ async def receive_insurer_event(
             from_value={"case_state": case_change[0]},
             to_value={"case_state": case_change[1]},
         )
+        # Вердикт REJECTED → case_state терминальный → системное закрытие заявки (#211):
+        # тот же путь, что decide/transition/payout — иначе INSURANCE-заявка остаётся под
+        # SLA-эскалацией (фильтр воркера по ticket.status).
+        await resolve_on_terminal_case(session, history, ticket, principal.user_id)
     await session.commit()
     await session.refresh(ticket)
     # Триггер outbound ticket.insurance_event (D8) — fire-after подписчикам (ПОСЛЕ commit).

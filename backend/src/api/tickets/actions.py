@@ -75,6 +75,41 @@ def _clear_payout_first_approver(ticket: Ticket) -> None:
         _write_claims_block(ticket, block)
 
 
+async def resolve_on_terminal_case(
+    session: AsyncSession,
+    history: TicketHistoryRepository,
+    ticket: Ticket,
+    actor_id: uuid.UUID,
+) -> None:
+    """Системно закрыть заявку в RESOLVED при входе case_state в терминал (PAID/REJECTED, #211).
+
+    Иначе claims-заявка с не-терминальным ticket.status продолжает выбираться SLA-воркером
+    по resolution-ноге и эскалироваться (фильтр воркера — по ticket.status; решение Архитектора:
+    PAID/REJECTED → RESOLVED). Переход системный — НЕ через operator-машину статусов (claims-
+    терминал уже валидирован case-машиной, и RESOLVED недостижим из NEW); идемпотентно: если
+    статус уже терминальный (RESOLVED/CLOSED) — no-op. resolved_at/TTR/breach проставляет
+    `apply_status_side_effects` (как обычный resolve).
+
+    Вызывается из ВСЕХ путей терминализации case_state: action-сервис (decide/transition/
+    payout) и insurer-webhook (`webhooks/inbound.py`, вердикт REJECTED — D2/#200).
+    """
+    if ticket.case_state is None or not is_case_terminal(TicketCaseState(ticket.case_state)):
+        return
+    current = TicketStatus(ticket.status)
+    if is_terminal(current):
+        return
+    ticket.status = TicketStatus.RESOLVED.value
+    apply_status_side_effects(ticket, current.value)
+    await session.flush()
+    await history.record(
+        ticket.id,
+        actor_id,
+        TicketHistoryAction.STATUS_CHANGED,
+        from_value={"status": current.value},
+        to_value={"status": TicketStatus.RESOLVED.value, "reason": "claims_terminal"},
+    )
+
+
 class TicketActionService:
     """Доменные операции action-эндпоинтов. Commit — на стороне вызывающего."""
 
@@ -319,29 +354,7 @@ class TicketActionService:
         await self._resolve_on_terminal_case(ticket, actor_id)
 
     async def _resolve_on_terminal_case(self, ticket: Ticket, actor_id: uuid.UUID) -> None:
-        """При входе case_state в терминал (PAID/REJECTED) системно закрыть заявку в RESOLVED.
-
-        Иначе claims-заявка с не-терминальным ticket.status продолжает выбираться SLA-воркером
-        по resolution-ноге и эскалироваться (фильтр воркера — по ticket.status, #211, решение
-        Архитектора: PAID/REJECTED → RESOLVED). Переход системный — НЕ через operator-машину
-        статусов (claims-терминал уже валидирован case-машиной, и RESOLVED недостижим из NEW);
-        идемпотентно: если статус уже терминальный (RESOLVED/CLOSED) — no-op. resolved_at и
-        TTR/breach проставляет `apply_status_side_effects` (как обычный resolve)."""
-        if ticket.case_state is None or not is_case_terminal(TicketCaseState(ticket.case_state)):
-            return
-        current = TicketStatus(ticket.status)
-        if is_terminal(current):
-            return
-        ticket.status = TicketStatus.RESOLVED.value
-        apply_status_side_effects(ticket, current.value)
-        await self._session.flush()
-        await self._history.record(
-            ticket.id,
-            actor_id,
-            TicketHistoryAction.STATUS_CHANGED,
-            from_value={"status": current.value},
-            to_value={"status": TicketStatus.RESOLVED.value, "reason": "claims_terminal"},
-        )
+        await resolve_on_terminal_case(self._session, self._history, ticket, actor_id)
 
     async def _approve_payout(
         self, ticket: Ticket, actor_id: uuid.UUID, note: str | None, *, now: datetime.datetime
