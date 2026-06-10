@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth.dependencies import get_current_principal
 from api.auth.principal import Principal, PrincipalKind
 from api.canned.usage import record_canned_usage
+from api.clients.acceptance_act import AcceptanceActClient
+from api.clients.acceptance_act.deps import get_acceptance_act_client
 from api.clients.kb_files import KbFilesClient
 from api.clients.kb_files.deps import get_kb_files_client
 from api.clients.kb_search import KbSearchClient
@@ -38,6 +40,7 @@ from api.notifications.dispatcher import (
     schedule_rating_cta,
     schedule_status_notification,
 )
+from api.tickets.acceptance import record_acceptance_act
 from api.tickets.actions import TicketActionService
 from api.tickets.decision_dispatch import (
     maybe_schedule_decision_delivery,
@@ -70,6 +73,7 @@ from api.tickets.requester_context import (
     get_platform_client,
 )
 from api.tickets.schemas import (
+    AcceptanceActInput,
     AssignInput,
     CaseStateTransitionInput,
     DecisionInput,
@@ -798,4 +802,43 @@ async def decide_ticket(
     maybe_schedule_decision_delivery(background, ticket, settings)
     # webhook ticket.case_decided — после решения (E10-8 PR-B, ADR-0015 D5).
     await schedule_webhook_event(background, session, ticket, WebhookEvent.CASE_DECIDED, settings)
+    return _ticket_envelope(ticket, x_request_id)
+
+
+@router.post(
+    "/{ticket_id}/acceptance-act",
+    response_model=TicketEnvelope,
+    summary="Зафиксировать акт приёмки-передачи",
+)
+async def record_acceptance_act_endpoint(
+    ticket_id: uuid.UUID,
+    payload: AcceptanceActInput,
+    background: BackgroundTasks,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+    acceptance_client: AcceptanceActClient | None = Depends(get_acceptance_act_client),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> TicketEnvelope:
+    """E10-9 (#199, FR-9.7, §3.3.4): оператор фиксирует акт приёмки-передачи → сервер
+    резолвит signing_status (AcceptanceAct-клиент, config-gated) + триггерит OTP-resend
+    (sms-seam #161, инертно). RBAC = оператор (ACCEPTANCE_ACT→support, D8). Только claims-
+    заявка типа ACCEPTANCE_ACT (иначе 422); чужая/невидимая → 404. Каскад MOVE_OUT+ущерб — PR-C."""
+    ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
+    if ticket is None:
+        raise ProblemException.not_found(detail="Ticket not found")
+    _require_operator(principal)
+    if ticket.case_state is None or ticket.type != TicketType.ACCEPTANCE_ACT.value:
+        raise ProblemException.unprocessable(detail="Ticket is not an acceptance-act claim")
+    await record_acceptance_act(
+        session,
+        ticket,
+        act_kind=payload.act_kind,
+        acceptance_act_id=payload.acceptance_act_id,
+        client=acceptance_client,
+        background=background,
+        settings=get_settings(),
+        actor_id=principal.user_id,
+    )
+    await session.commit()
+    await session.refresh(ticket)
     return _ticket_envelope(ticket, x_request_id)

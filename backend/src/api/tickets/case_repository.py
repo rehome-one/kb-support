@@ -54,3 +54,19 @@ class TicketCaseDetailsRepository:
         details.payload = validate_case_payload(CaseType(details.case_type), dict(payload))
         await self._session.flush()
         return details
+
+    async def update_act(
+        self,
+        details: TicketCaseDetails,
+        *,
+        act_kind: ActKind | None = None,
+        signing_status: SigningStatus | None = None,
+    ) -> TicketCaseDetails:
+        """Обновить typed-поля акта (E10-9). Передан None → поле не трогаем (M4: upstream-резолв
+        авторитетен, но отсутствие резолва НЕ затирает signing_status в NULL)."""
+        if act_kind is not None:
+            details.act_kind = act_kind.value
+        if signing_status is not None:
+            details.signing_status = signing_status.value
+        await self._session.flush()
+        return details

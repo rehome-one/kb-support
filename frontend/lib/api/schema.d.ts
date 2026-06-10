@@ -196,6 +196,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/support/tickets/{id}/acceptance-act": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Зафиксировать акт приёмки-передачи
+         * @description Оператор фиксирует act_kind и id акта upstream; сервер резолвит signing_status (AcceptanceAct, config-gated) и триггерит переотправку SMS-OTP (seam). Только claims-заявка типа ACCEPTANCE_ACT. signing_status не принимается от клиента (авторитетен upstream-резолв). Провизорно (ADR-0016).
+         */
+        post: operations["recordAcceptanceAct"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/support/tickets/{id}/messages": {
         parameters: {
             query?: never;
@@ -722,6 +742,15 @@ export interface components {
          * @enum {string}
          */
         ActKind: "MOVE_IN" | "MOVE_OUT";
+        /** @description Тело recordAcceptanceAct (E10-9). signing_status резолвится сервером (не принимается). */
+        AcceptanceActInput: {
+            act_kind: components["schemas"]["ActKind"];
+            /**
+             * Format: uuid
+             * @description Идентификатор акта на стороне upstream (для резолва signing_status).
+             */
+            acceptance_act_id: string;
+        };
         /**
          * @description Статус подписания акта
          * @enum {string}
@@ -1967,6 +1996,40 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    recordAcceptanceAct: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description CSRF-токен для браузерных сессий (CookieAuth) */
+                "X-CSRF-Token"?: components["parameters"]["CsrfToken"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptanceActInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["Ticket"];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };
