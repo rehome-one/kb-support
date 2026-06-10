@@ -55,6 +55,7 @@ from api.tickets.enums import (
     TicketType,
 )
 from api.tickets.history import TicketHistoryAction, TicketHistoryRepository
+from api.tickets.insurer_dispatch import maybe_schedule_insurer_event
 from api.tickets.messages import (
     TicketMessageRepository,
     is_public_operator_reply,
@@ -768,6 +769,8 @@ async def transition_case_state(
         await schedule_webhook_event(
             background, session, ticket, WebhookEvent.PAYOUT_RELEASED, settings
         )
+    # insurer-outbound — передача события страховщику при входе INSURANCE в UNDER_REVIEW (E10-10).
+    maybe_schedule_insurer_event(background, ticket, old_case_state, settings)
     return _ticket_envelope(ticket, x_request_id)
 
 
