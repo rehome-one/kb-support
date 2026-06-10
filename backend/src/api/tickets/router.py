@@ -41,6 +41,7 @@ from api.notifications.dispatcher import (
     schedule_status_notification,
 )
 from api.tickets.acceptance import record_acceptance_act
+from api.tickets.acceptance_cascade import maybe_cascade_compensation
 from api.tickets.actions import TicketActionService
 from api.tickets.decision_dispatch import (
     maybe_schedule_decision_delivery,
@@ -829,7 +830,7 @@ async def record_acceptance_act_endpoint(
     _require_operator(principal)
     if ticket.case_state is None or ticket.type != TicketType.ACCEPTANCE_ACT.value:
         raise ProblemException.unprocessable(detail="Ticket is not an acceptance-act claim")
-    await record_acceptance_act(
+    act = await record_acceptance_act(
         session,
         ticket,
         act_kind=payload.act_kind,
@@ -839,6 +840,9 @@ async def record_acceptance_act_endpoint(
         settings=get_settings(),
         actor_id=principal.user_id,
     )
+    # Каскад MOVE_OUT+ущерб → связанный COMPENSATION (E10-9 PR-C, ADR-0016 D3) — в той же
+    # транзакции (идемпотентно по линку родителя).
+    await maybe_cascade_compensation(session, ticket, act)
     await session.commit()
     await session.refresh(ticket)
     return _ticket_envelope(ticket, x_request_id)
