@@ -818,6 +818,8 @@ export interface components {
         Ticket: components["schemas"]["TicketSummary"] & {
             /** @description Статусы, в которые разрешён переход из текущего (машина состояний §3.2) */
             readonly allowed_status_transitions?: components["schemas"]["TicketStatus"][];
+            /** @description Состояния разбирательства, в которые разрешён переход из текущего case_state (машина §3.2.1); пусто для не-claims заявок и терминальных состояний */
+            readonly allowed_case_transitions?: components["schemas"]["TicketCaseState"][];
             /** @description Первичное описание проблемы */
             description?: string;
             /**

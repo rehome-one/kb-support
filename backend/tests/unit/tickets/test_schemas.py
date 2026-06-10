@@ -9,7 +9,12 @@ import uuid
 import pytest
 from pydantic import ValidationError
 
-from api.tickets.enums import TicketPriority, TicketStatus, TicketType
+from api.tickets.enums import (
+    TicketCaseState,
+    TicketPriority,
+    TicketStatus,
+    TicketType,
+)
 from api.tickets.schemas import TicketCreate, TicketRead
 
 
@@ -111,3 +116,43 @@ def test_read_claims_fields_null_on_e1() -> None:
         "case_details",
     ):
         assert dumped[field_name] is None
+
+
+def _read_with_case_state(case_state: str | None) -> TicketRead:
+    raw = _ticket_like()
+    raw.case_state = case_state
+    return TicketRead.model_validate(raw)
+
+
+def test_allowed_case_transitions_empty_for_non_claims() -> None:
+    """Не-claims заявка (case_state=None) → пустой список переходов разбирательства (#231)."""
+    assert _read_with_case_state(None).allowed_case_transitions == []
+
+
+def test_allowed_case_transitions_from_start() -> None:
+    """CLAIM_SUBMITTED → DOCS_PENDING / UNDER_REVIEW / REJECTED (порядок = объявление enum)."""
+    assert _read_with_case_state("CLAIM_SUBMITTED").allowed_case_transitions == [
+        TicketCaseState.DOCS_PENDING,
+        TicketCaseState.UNDER_REVIEW,
+        TicketCaseState.REJECTED,
+    ]
+
+
+def test_allowed_case_transitions_mid_state() -> None:
+    """UNDER_REVIEW → INSPECTION / DECISION_MADE / REJECTED; текущее состояние не входит."""
+    assert _read_with_case_state("UNDER_REVIEW").allowed_case_transitions == [
+        TicketCaseState.INSPECTION,
+        TicketCaseState.DECISION_MADE,
+        TicketCaseState.REJECTED,
+    ]
+
+
+@pytest.mark.parametrize("terminal", ["PAID", "REJECTED"])
+def test_allowed_case_transitions_empty_for_terminal(terminal: str) -> None:
+    """Терминальные состояния (PAID/REJECTED) не имеют исходящих переходов."""
+    assert _read_with_case_state(terminal).allowed_case_transitions == []
+
+
+def test_allowed_case_transitions_empty_for_unknown_value() -> None:
+    """Значение вне домена не роняет computed-поле — защитный guard возвращает []."""
+    assert _read_with_case_state("NOPE").allowed_case_transitions == []
