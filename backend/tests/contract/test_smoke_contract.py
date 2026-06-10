@@ -43,6 +43,19 @@ def test_spec_loads_and_has_core_paths() -> None:
         assert schema in SPEC["components"]["schemas"]
 
 
+def test_insurer_event_ingest_carries_verdict_fields() -> None:
+    """AT-002 drift: InsurerEventIngest несёт provisional-вердикт страховщика (E10-10 PR-C, D2).
+
+    Поля опциональны (не в `required`) — обратная совместимость с E10-8; `insurer_decision`
+    ограничен доменом APPROVED/REJECTED."""
+    schema = SPEC["components"]["schemas"]["InsurerEventIngest"]
+    props = schema["properties"]
+    assert "insurer_status" in props
+    assert "insurer_decision" in props
+    assert props["insurer_decision"]["enum"] == ["APPROVED", "REJECTED"]
+    assert set(schema["required"]) == {"ticket_number", "insurance_event_id"}
+
+
 @requires_postgres
 def test_create_from_chat_response_conforms(service_client: TestClient) -> None:
     """Drift-детектор: ответ POST /from-chat (201) соответствует Ticket (E3-1, #69)."""

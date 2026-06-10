@@ -1510,6 +1510,13 @@ export interface components {
              * @description Идентификатор страхового события на стороне страховщика.
              */
             insurance_event_id: string;
+            /** @description Статусный лейбл на стороне страховщика (provisional, ADR-0017 D2). Фиксируется в InsurancePayload.insurer_status. Опционален. */
+            insurer_status?: string;
+            /**
+             * @description Вердикт страховщика (provisional, ADR-0017 D2). Системно двигает case_state по машине E10-2: APPROVED → DECISION_MADE, REJECTED → REJECTED. Не применяет наш decision. Опционален.
+             * @enum {string}
+             */
+            insurer_decision?: "APPROVED" | "REJECTED";
         };
         GuaranteeEventIngest: {
             /** @description Тип исключения (мошенничество/просрочка регресса/приостановка, 5.7.6/7/8). */
