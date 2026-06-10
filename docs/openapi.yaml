@@ -1993,6 +1993,12 @@ components:
             description: Статусы, в которые разрешён переход из текущего (машина состояний §3.2)
             items:
               $ref: '#/components/schemas/TicketStatus'
+          allowed_case_transitions:
+            type: array
+            readOnly: true
+            description: Состояния разбирательства, в которые разрешён переход из текущего case_state (машина §3.2.1); пусто для не-claims заявок и терминальных состояний
+            items:
+              $ref: '#/components/schemas/TicketCaseState'
           description:
             type: string
             description: Первичное описание проблемы

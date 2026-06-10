@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from api.tickets.case_state_machine import is_allowed_case_transition
 from api.tickets.enums import (
     AccessLevel,
     ActKind,
@@ -268,6 +269,29 @@ class TicketRead(BaseModel):
             status
             for status in TicketStatus
             if status != self.status and is_allowed_transition(self.status, status)
+        ]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def allowed_case_transitions(self) -> list[TicketCaseState]:
+        """Состояния разбирательства, в которые разрешён переход из текущего `case_state`.
+
+        Источник истины — `case_state_machine.CASE_ALLOWED_TRANSITIONS`; экспонируется,
+        чтобы фронт claims-карточки подсвечивал допустимые переходы без дублирования
+        таблицы (#231, аналог `allowed_status_transitions` из #60). На не-claims заявках
+        (`case_state is None`) и в терминальных состояниях (PAID/REJECTED) — пустой список.
+        """
+        if self.case_state is None:
+            return []
+        # case_state хранится как String (конвенция E1); значение вне домена быть не должно
+        # (валидируется на записи), но computed-поле обязано оставаться тотальным — защитный guard.
+        current = next((s for s in TicketCaseState if s.value == self.case_state), None)
+        if current is None:
+            return []
+        return [
+            state
+            for state in TicketCaseState
+            if state != current and is_allowed_case_transition(current, state)
         ]
 
     @computed_field  # type: ignore[prop-decorator]
