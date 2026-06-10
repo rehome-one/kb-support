@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.errors import ProblemException
 from api.tickets.case_repository import TicketCaseDetailsRepository
-from api.tickets.case_state_machine import is_allowed_case_transition
+from api.tickets.case_state_machine import is_allowed_case_transition, is_case_terminal
 from api.tickets.claims_sla import compute_payout_due_at, compute_regress_due_at
 from api.tickets.enums import (
     CaseType,
@@ -31,7 +31,7 @@ from api.tickets.history import TicketHistoryAction, TicketHistoryRepository
 from api.tickets.models import Ticket
 from api.tickets.rating_metrics import record_rating
 from api.tickets.repository import apply_status_side_effects
-from api.tickets.state_machine import is_allowed_transition
+from api.tickets.state_machine import is_allowed_transition, is_terminal
 
 # Оценка заявителя возможна только в терминальных состояниях.
 _RATEABLE_STATUSES = frozenset({TicketStatus.RESOLVED.value, TicketStatus.CLOSED.value})
@@ -73,6 +73,41 @@ def _clear_payout_first_approver(ticket: Ticket) -> None:
     if _PAYOUT_APPROVER in block:
         block.pop(_PAYOUT_APPROVER)
         _write_claims_block(ticket, block)
+
+
+async def resolve_on_terminal_case(
+    session: AsyncSession,
+    history: TicketHistoryRepository,
+    ticket: Ticket,
+    actor_id: uuid.UUID,
+) -> None:
+    """Системно закрыть заявку в RESOLVED при входе case_state в терминал (PAID/REJECTED, #211).
+
+    Иначе claims-заявка с не-терминальным ticket.status продолжает выбираться SLA-воркером
+    по resolution-ноге и эскалироваться (фильтр воркера — по ticket.status; решение Архитектора:
+    PAID/REJECTED → RESOLVED). Переход системный — НЕ через operator-машину статусов (claims-
+    терминал уже валидирован case-машиной, и RESOLVED недостижим из NEW); идемпотентно: если
+    статус уже терминальный (RESOLVED/CLOSED) — no-op. resolved_at/TTR/breach проставляет
+    `apply_status_side_effects` (как обычный resolve).
+
+    Вызывается из ВСЕХ путей терминализации case_state: action-сервис (decide/transition/
+    payout) и insurer-webhook (`webhooks/inbound.py`, вердикт REJECTED — D2/#200).
+    """
+    if ticket.case_state is None or not is_case_terminal(TicketCaseState(ticket.case_state)):
+        return
+    current = TicketStatus(ticket.status)
+    if is_terminal(current):
+        return
+    ticket.status = TicketStatus.RESOLVED.value
+    apply_status_side_effects(ticket, current.value)
+    await session.flush()
+    await history.record(
+        ticket.id,
+        actor_id,
+        TicketHistoryAction.STATUS_CHANGED,
+        from_value={"status": current.value},
+        to_value={"status": TicketStatus.RESOLVED.value, "reason": "claims_terminal"},
+    )
 
 
 class TicketActionService:
@@ -255,6 +290,7 @@ class TicketActionService:
             from_value={"case_state": current.value},
             to_value=to_value,
         )
+        await self._resolve_on_terminal_case(ticket, actor_id)
 
     async def decide(
         self,
@@ -314,6 +350,11 @@ class TicketActionService:
         await self._history.record(
             ticket.id, actor_id, TicketHistoryAction.CASE_DECIDED, to_value=to_value
         )
+        # decision=REJECTED → case_state REJECTED (терминал) → системное закрытие (#211).
+        await self._resolve_on_terminal_case(ticket, actor_id)
+
+    async def _resolve_on_terminal_case(self, ticket: Ticket, actor_id: uuid.UUID) -> None:
+        await resolve_on_terminal_case(self._session, self._history, ticket, actor_id)
 
     async def _approve_payout(
         self, ticket: Ticket, actor_id: uuid.UUID, note: str | None, *, now: datetime.datetime
@@ -357,6 +398,7 @@ class TicketActionService:
             from_value={"case_state": TicketCaseState.PAYOUT_PENDING.value},
             to_value=to_value,
         )
+        await self._resolve_on_terminal_case(ticket, actor_id)
 
     async def _record_regress_due_at(self, ticket: Ticket, *, now: datetime.datetime) -> None:
         """Фиксация-seam: срок регресса 14 кал.дн при выплате GUARANTEE (Договор 5.8.8, Q4).

@@ -1489,6 +1489,71 @@ def test_decision_unknown_ticket_404(client: TestClient) -> None:
     )
 
 
+# --- Терминал claims → закрытие статуса (E10, #211) ---
+
+
+def test_decision_rejected_resolves_ticket_status(client: TestClient) -> None:
+    """#211: decision=REJECTED → case_state REJECTED (терминал) → ticket.status=RESOLVED."""
+    _use(_claims_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "UNDER_REVIEW")
+    resp = _decide(client, ticket_id, decision="REJECTED", reason="вне покрытия")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["case_state"] == "REJECTED"
+    assert data["status"] == "RESOLVED"
+    assert data["resolved_at"] is not None
+    assert "status_changed" in _history_actions(client, ticket_id)
+
+
+def test_case_state_rejected_resolves_ticket_status(client: TestClient) -> None:
+    """#211: переход case_state→REJECTED (терминал) системно закрывает заявку в RESOLVED."""
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "UNDER_REVIEW")
+    resp = _action(client, ticket_id, "case-state", case_state="REJECTED")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "RESOLVED"
+
+
+def test_payout_paid_resolves_ticket_status(client: TestClient) -> None:
+    """#211: PAID (терминал, «4 глаза») → ticket.status=RESOLVED — SLA-воркер не эскалирует."""
+    op_a, op_b = _operator(), _operator()
+    _use(op_a)
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_team(ticket_id, "support")
+    _set_case_state(ticket_id, "PAYOUT_PENDING")
+    assert _action(client, ticket_id, "case-state", case_state="PAID").status_code == 200
+    _use(op_b)
+    resp = _action(client, ticket_id, "case-state", case_state="PAID")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["case_state"] == "PAID"
+    assert data["status"] == "RESOLVED"
+
+
+def test_non_terminal_case_state_does_not_resolve(client: TestClient) -> None:
+    """#211: не-терминальный переход (UNDER_REVIEW→INSPECTION) НЕ трогает ticket.status."""
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, "OPEN")
+    _set_case_state(ticket_id, "UNDER_REVIEW")
+    resp = _action(client, ticket_id, "case-state", case_state="INSPECTION")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "OPEN"
+
+
+def test_terminal_case_keeps_already_closed_status(client: TestClient) -> None:
+    """#211: если заявка уже CLOSED, терминал claims не перезаписывает статус (идемпотентно)."""
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_status(ticket_id, "CLOSED")
+    _set_case_state(ticket_id, "UNDER_REVIEW")
+    resp = _action(client, ticket_id, "case-state", case_state="REJECTED")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "CLOSED"
+
+
 # --- Приём claims (E10-5 #195) ---
 
 

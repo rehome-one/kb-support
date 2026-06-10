@@ -278,7 +278,11 @@ def test_verdict_rejected_moves_to_rejected(
     )
     resp = client.post(_INSURER_EVENTS, content=raw, headers=headers)
     assert resp.status_code == 202, resp.text
-    assert resp.json()["data"]["case_state"] == "REJECTED"
+    data = resp.json()["data"]
+    assert data["case_state"] == "REJECTED"
+    # #211: вердикт REJECTED — терминал claims → заявка системно закрыта в RESOLVED
+    # (иначе INSURANCE-заявка осталась бы под SLA-эскалацией; путь insurer-webhook).
+    assert data["status"] == "RESOLVED"
 
 
 def test_status_only_saved_without_state_change(
