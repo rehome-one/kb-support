@@ -594,6 +594,49 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/tickets/{id}/acceptance-act:
+    post:
+      tags:
+      - Tickets
+      summary: Зафиксировать акт приёмки-передачи
+      description: >-
+        Оператор фиксирует act_kind и id акта upstream; сервер резолвит signing_status
+        (AcceptanceAct, config-gated) и триггерит переотправку SMS-OTP (seam). Только
+        claims-заявка типа ACCEPTANCE_ACT. signing_status не принимается от клиента
+        (авторитетен upstream-резолв). Провизорно (ADR-0016).
+      operationId: recordAcceptanceAct
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptanceActInput'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/support/tickets/{id}/messages:
     parameters:
     - name: id
@@ -1801,6 +1844,19 @@ components:
       - MOVE_IN
       - MOVE_OUT
       description: Тип акта приёма-передачи
+    AcceptanceActInput:
+      type: object
+      required:
+      - act_kind
+      - acceptance_act_id
+      properties:
+        act_kind:
+          $ref: '#/components/schemas/ActKind'
+        acceptance_act_id:
+          type: string
+          format: uuid
+          description: Идентификатор акта на стороне upstream (для резолва signing_status).
+      description: Тело recordAcceptanceAct (E10-9). signing_status резолвится сервером (не принимается).
     SigningStatus:
       type: string
       enum:

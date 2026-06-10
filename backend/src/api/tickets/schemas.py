@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from api.tickets.enums import (
     AccessLevel,
+    ActKind,
     AuthorType,
     TicketCaseState,
     TicketChannel,
@@ -387,6 +388,19 @@ class DecisionInput(BaseModel):
     decision: TicketDecision
     approved_amount: float | None = Field(default=None, ge=0)
     reason: str | None = Field(default=None, max_length=4000)
+
+
+class AcceptanceActInput(BaseModel):
+    """Тело POST /tickets/{id}/acceptance-act (контракт recordAcceptanceAct, E10-9 PR-B).
+
+    Оператор фиксирует тип акта и id акта upstream → сервер резолвит signing_status и
+    триггерит OTP-resend (ADR-0016 D4). signing_status НЕ принимается от клиента (M4:
+    авторитетен upstream-резолв)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    act_kind: ActKind
+    acceptance_act_id: uuid.UUID
 
 
 class TicketMessageCreate(BaseModel):

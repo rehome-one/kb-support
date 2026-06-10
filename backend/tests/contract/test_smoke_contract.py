@@ -25,6 +25,7 @@ def test_spec_loads_and_has_core_paths() -> None:
     assert "/api/v1/support/tickets/from-email" in SPEC["paths"]
     assert "/api/v1/support/stats" in SPEC["paths"]
     assert "/api/v1/support/insurer-events" in SPEC["paths"]
+    assert "/api/v1/support/tickets/{id}/acceptance-act" in SPEC["paths"]
     for schema in (
         "Ticket",
         "TicketSummary",
@@ -35,6 +36,7 @@ def test_spec_loads_and_has_core_paths() -> None:
         "EmailIngest",
         "SupportStats",
         "InsurerEventIngest",
+        "AcceptanceActInput",
     ):
         assert schema in SPEC["components"]["schemas"]
 
@@ -604,6 +606,28 @@ def test_insurer_event_response_conforms(
     )
     assert resp.status_code == 202, resp.text
     assert_response_conforms("/api/v1/support/insurer-events", "post", "202", resp.json())
+
+
+@requires_postgres
+def test_record_acceptance_act_response_conforms(operator_client: TestClient) -> None:
+    """AT-002 (#199 PR-B): recordAcceptanceAct (200) соответствует Ticket.
+
+    Интеграция AcceptanceAct выключена в тесте (пустой токен → резолв None); операция
+    проставляет act_kind и возвращает заявку."""
+    created = operator_client.post(
+        "/api/v1/support/tickets", json={"subject": "акт", "type": "ACCEPTANCE_ACT"}
+    )
+    assert created.status_code == 201, created.text
+    ticket_id = created.json()["data"]["id"]
+
+    resp = operator_client.post(
+        f"/api/v1/support/tickets/{ticket_id}/acceptance-act",
+        json={"act_kind": "MOVE_OUT", "acceptance_act_id": str(uuid.uuid4())},
+    )
+    assert resp.status_code == 200, resp.text
+    assert_response_conforms(
+        "/api/v1/support/tickets/{id}/acceptance-act", "post", "200", resp.json()
+    )
 
 
 def test_prism_mock_serves_tickets(prism_mock: str) -> None:
