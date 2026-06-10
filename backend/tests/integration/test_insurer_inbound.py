@@ -354,8 +354,51 @@ def test_verdict_replay_same_event_id_is_noop(
     assert repeat.json()["data"]["case_state"] == "REJECTED"
 
 
+def test_status_stored_when_case_details_missing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Защитная create-ветка: если TicketCaseDetails отсутствует, insurer_status создаёт детали
+    (а не падает). При интейке детали есть, поэтому удаляем их напрямую перед приёмом."""
+    monkeypatch.setattr("api.webhooks.dispatcher.deliver_webhook", _noop_deliver)
+    _enable_secret(monkeypatch)
+    number = _create_insurance_claim(client)
+    ticket_id = _ticket_id_by_number(client, number)
+    _delete_case_details(ticket_id)
+
+    _use(_SERVICE)
+    raw, headers = _signed(
+        {
+            "ticket_number": number,
+            "insurance_event_id": str(uuid.uuid4()),
+            "insurer_status": "created_from_verdict",
+        }
+    )
+    resp = client.post(_INSURER_EVENTS, content=raw, headers=headers)
+    assert resp.status_code == 202, resp.text
+    assert _insurer_status_in_payload(ticket_id) == "created_from_verdict"
+
+
 async def _noop_deliver(url: str, secret: str, delivery: object, settings: object) -> None:
     return None
+
+
+def _delete_case_details(ticket_id: str) -> None:
+    """Удалить TicketCaseDetails заявки напрямую (NullPool) — для покрытия create-ветки."""
+
+    async def _run() -> None:
+        engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        try:
+            async with factory() as session:
+                repo = TicketCaseDetailsRepository(session)
+                details = await repo.get_by_ticket(uuid.UUID(ticket_id))
+                if details is not None:
+                    await session.delete(details)
+                    await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
 
 
 def _insurer_status_in_payload(ticket_id: str) -> str | None:
