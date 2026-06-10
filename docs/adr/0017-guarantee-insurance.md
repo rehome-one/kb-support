@@ -3,10 +3,10 @@
 ## Статус
 
 - [ ] Предложено
-- [x] **Принято** — *ожидает подписи Архитектора*
+- [x] **Принято**
 - **Дата:** 2026-06-10
-- **Автор:** Агент-Разработчик; принимается Архитектором (Evgeniy)
-- **Согласовано Архитектором:** 4 решения зафиксированы 2026-06-10 (GUARANTEE-inbound, INSURANCE-вердикт, insurer-outbound, регресс-ссылки); подпись «Принято» — при merge.
+- **Автор:** Агент-Разработчик; принято Архитектором (Evgeniy)
+- **Согласовано Архитектором:** да, 2026-06-10 (4 решения — GUARANTEE-inbound, INSURANCE-вердикт, insurer-outbound, регресс-ссылки — ратифицированы; подпись «Принято» проставлена).
 
 > Этот ADR детализирует **ADR-0013** (GUARANTEE/INSURANCE — «это E10»; D2 пеня→платёжный контур; D8 маршрутизация)
 > и **ADR-0014** (insurer-outbound `POST /api/v1/events`, l.67) для под-задачи **E10-10 (#200)** (FR-9.5/9.6,
@@ -44,6 +44,7 @@ hardening-follow-up:** частичный uniq-индекс на `(custom_fields
 (в отличие от chat-дедупа) — идемпотентность держится на сериализации инертного/config-gated режима. Без миграции сейчас.
 
 **D2 — INSURANCE-вердикт = расширение inbound `insurer-events`.**
+*(Проектируемое поведение E10-10 — текущий `webhooks/inbound.py` пишет только `insurance_event_id`; ниже — после расширения.)*
 `InsurerEventIngest` дополняется опц. `insurer_status?`/`insurer_decision?`. Вердикт страховщика → фиксируется в
 `InsurancePayload.insurer_status` + **системно двигает case_state** по машине E10-2. **Наш `decide()` НЕ применяем,
 `ticket.decision` НЕ трогаем** — это наш внутренний вердикт (FR-9.3, legal/finance), а решение по INSURANCE — страховщика.
@@ -62,8 +63,9 @@ AND old!=UNDER_REVIEW`, edge-triggered как `is_newly_paid`; без копий
 **D4 — Регресс GUARANTEE = фиксация-ссылки при создании.**
 **Плоские колонки Ticket:** `regress_obligation_id`, `policy_id` (ставит платёжный контур — сохраняем).
 **`GuaranteePayload`:** `missed_payment_id`, `guarantee_paused`, `late_fee_accrued` (**число-ссылка, приходит ГОТОВЫМ** —
-пеню НЕ вычисляем, D2/FR-9.8). `regress_due_at` при создании НЕ трогаем — его пишет существующий `_record_regress_due_at`
-при PAID (E10-6). Создание ≠ выплата, конфликта нет.
+пеню НЕ вычисляем, D2/FR-9.8). `regress_due_at` **и** `guarantee_payout_id` при создании НЕ трогаем — `regress_due_at`
+пишет существующий `_record_regress_due_at` при PAID (E10-6), `guarantee_payout_id` ставит платёжный контур позже.
+Создание ≠ выплата, конфликта нет.
 
 ### Провизорные контракты (уточняются при провижининге)
 
