@@ -11,6 +11,7 @@ import base64
 import binascii
 import datetime
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -142,9 +143,46 @@ def _require_claims_operator(principal: Principal) -> None:
         raise ProblemException.forbidden(detail="Claims decision requires legal/finance team")
 
 
-def _ticket_envelope(ticket: Ticket, x_request_id: str | None) -> TicketEnvelope:
+# Служебные ключи custom_fields.claims — внутреннее staff-состояние, НЕ для заявителя.
+# `payout_first_approver` — actor_id первого подтверждающего «4 глаза» (D6, actions.py):
+# его раскрытие claimant'у — утечка ПДн оператора (ФЗ-152/NFR-1.3, #202).
+_INTERNAL_CLAIMS_KEYS: frozenset[str] = frozenset({"payout_first_approver"})
+
+
+def _redact_internal_claims(custom_fields: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Убрать служебные claims-ключи из custom_fields (видны только оператору).
+
+    Возвращает копию (исходный dict ORM-объекта не мутируется — он привязан к сессии).
+    """
+    if not custom_fields:
+        return custom_fields
+    claims = custom_fields.get("claims")
+    if not isinstance(claims, dict):
+        return custom_fields
+    kept = {k: v for k, v in claims.items() if k not in _INTERNAL_CLAIMS_KEYS}
+    redacted = dict(custom_fields)
+    if kept:
+        redacted["claims"] = kept
+    else:
+        redacted.pop("claims", None)
+    return redacted
+
+
+def _ticket_read(ticket: Ticket, principal: Principal) -> TicketRead:
+    """TicketRead с редакцией служебных claims-полей для не-операторов (#202)."""
+    read = TicketRead.model_validate(ticket)
+    if not principal.is_operator:
+        read = read.model_copy(
+            update={"custom_fields": _redact_internal_claims(read.custom_fields)}
+        )
+    return read
+
+
+def _ticket_envelope(
+    ticket: Ticket, x_request_id: str | None, principal: Principal
+) -> TicketEnvelope:
     return TicketEnvelope(
-        data=TicketRead.model_validate(ticket),
+        data=_ticket_read(ticket, principal),
         request_id=_resolve_request_id(x_request_id),
     )
 
@@ -195,7 +233,7 @@ async def create_ticket(
     await session.commit()
     await session.refresh(ticket)
     return TicketEnvelope(
-        data=TicketRead.model_validate(ticket),
+        data=_ticket_read(ticket, principal),
         request_id=_resolve_request_id(x_request_id),
     )
 
@@ -224,7 +262,7 @@ async def create_ticket_from_chat(
     ticket, _created = await TicketRepository(session).create_from_chat(payload, principal)
     await session.commit()
     await session.refresh(ticket)
-    return _ticket_envelope(ticket, x_request_id)
+    return _ticket_envelope(ticket, x_request_id, principal)
 
 
 # Фиксированный body начального сообщения-носителя вложений веб-формы (решение
@@ -276,7 +314,7 @@ async def create_ticket_from_web_form(
         )
     await session.commit()
     await session.refresh(ticket)
-    return _ticket_envelope(ticket, x_request_id)
+    return _ticket_envelope(ticket, x_request_id, principal)
 
 
 @router.post(
@@ -321,7 +359,7 @@ async def create_ticket_from_email(
     # после commit/refresh. created/deduped в контракт не выносим — 201 + ссылка.
     await session.commit()
     await session.refresh(result.ticket)
-    return _ticket_envelope(result.ticket, x_request_id)
+    return _ticket_envelope(result.ticket, x_request_id, principal)
 
 
 @router.get("", response_model=TicketListEnvelope, summary="Список заявок")
@@ -383,7 +421,7 @@ async def get_ticket(
     if ticket is None:
         raise ProblemException.not_found(detail="Ticket not found")
     return TicketEnvelope(
-        data=TicketRead.model_validate(ticket),
+        data=_ticket_read(ticket, principal),
         request_id=_resolve_request_id(x_request_id),
     )
 
@@ -427,7 +465,7 @@ async def update_ticket(
     if cta:
         schedule_rating_cta(background, updated, get_settings())
     return TicketEnvelope(
-        data=TicketRead.model_validate(updated),
+        data=_ticket_read(updated, principal),
         request_id=_resolve_request_id(x_request_id),
     )
 
@@ -609,7 +647,7 @@ async def assign_ticket(
     )
     await session.commit()
     await session.refresh(ticket)
-    return _ticket_envelope(ticket, x_request_id)
+    return _ticket_envelope(ticket, x_request_id, principal)
 
 
 @router.post("/{ticket_id}/escalate", response_model=TicketEnvelope, summary="Эскалировать")
@@ -629,7 +667,7 @@ async def escalate_ticket(
     )
     await session.commit()
     await session.refresh(ticket)
-    return _ticket_envelope(ticket, x_request_id)
+    return _ticket_envelope(ticket, x_request_id, principal)
 
 
 @router.post("/{ticket_id}/resolve", response_model=TicketEnvelope, summary="Отметить решённой")
@@ -654,7 +692,7 @@ async def resolve_ticket(
     await session.refresh(ticket)
     if notice is not None:
         schedule_status_notification(background, ticket, notice, get_settings())
-    return _ticket_envelope(ticket, x_request_id)
+    return _ticket_envelope(ticket, x_request_id, principal)
 
 
 @router.post("/{ticket_id}/close", response_model=TicketEnvelope, summary="Закрыть заявку")
@@ -679,7 +717,7 @@ async def close_ticket(
         schedule_status_notification(background, ticket, notice, get_settings())
     if cta:
         schedule_rating_cta(background, ticket, get_settings())
-    return _ticket_envelope(ticket, x_request_id)
+    return _ticket_envelope(ticket, x_request_id, principal)
 
 
 @router.post("/{ticket_id}/reopen", response_model=TicketEnvelope, summary="Переоткрыть заявку")
@@ -703,7 +741,7 @@ async def reopen_ticket(
     await session.refresh(ticket)
     if notice is not None:
         schedule_status_notification(background, ticket, notice, get_settings())
-    return _ticket_envelope(ticket, x_request_id)
+    return _ticket_envelope(ticket, x_request_id, principal)
 
 
 @router.post("/{ticket_id}/rate", response_model=TicketEnvelope, summary="Оценка заявителя")
@@ -728,7 +766,7 @@ async def rate_ticket(
     await session.refresh(ticket)
     # FR-8.2: низкую оценку (1-2) — супервайзеру fire-after (config-gated seam, #183).
     notify_low_rating(background, ticket, get_settings())
-    return _ticket_envelope(ticket, x_request_id)
+    return _ticket_envelope(ticket, x_request_id, principal)
 
 
 @router.post(
@@ -771,7 +809,7 @@ async def transition_case_state(
         )
     # insurer-outbound — передача события страховщику при входе INSURANCE в UNDER_REVIEW (E10-10).
     maybe_schedule_insurer_event(background, ticket, old_case_state, settings)
-    return _ticket_envelope(ticket, x_request_id)
+    return _ticket_envelope(ticket, x_request_id, principal)
 
 
 @router.post("/{ticket_id}/decision", response_model=TicketEnvelope, summary="Решение по претензии")
@@ -806,7 +844,7 @@ async def decide_ticket(
     maybe_schedule_decision_delivery(background, ticket, settings)
     # webhook ticket.case_decided — после решения (E10-8 PR-B, ADR-0015 D5).
     await schedule_webhook_event(background, session, ticket, WebhookEvent.CASE_DECIDED, settings)
-    return _ticket_envelope(ticket, x_request_id)
+    return _ticket_envelope(ticket, x_request_id, principal)
 
 
 @router.post(
@@ -848,4 +886,4 @@ async def record_acceptance_act_endpoint(
     await maybe_cascade_compensation(session, ticket, act)
     await session.commit()
     await session.refresh(ticket)
-    return _ticket_envelope(ticket, x_request_id)
+    return _ticket_envelope(ticket, x_request_id, principal)
