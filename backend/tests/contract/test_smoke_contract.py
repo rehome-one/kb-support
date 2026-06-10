@@ -175,6 +175,7 @@ def test_get_ticket_exposes_allowed_status_transitions(operator_client: TestClie
     assert_response_conforms("/api/v1/support/tickets/{id}", "get", "200", body)
 
 
+@requires_postgres
 def test_get_ticket_exposes_allowed_case_transitions(operator_client: TestClient) -> None:
     """getTicket отдаёт allowed_case_transitions; не-claims (case_state=None) → пусто (#231)."""
     created = operator_client.post(
