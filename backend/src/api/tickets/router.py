@@ -44,6 +44,7 @@ from api.notifications.dispatcher import (
 from api.tickets.acceptance import record_acceptance_act
 from api.tickets.acceptance_cascade import maybe_cascade_compensation
 from api.tickets.actions import TicketActionService
+from api.tickets.case_repository import TicketCaseDetailsRepository
 from api.tickets.decision_dispatch import (
     maybe_schedule_decision_delivery,
     maybe_schedule_ledger,
@@ -62,7 +63,7 @@ from api.tickets.messages import (
     is_public_operator_reply,
     message_added_payload,
 )
-from api.tickets.models import Ticket
+from api.tickets.models import Ticket, TicketCaseDetails
 from api.tickets.pagination import TicketSortKey
 from api.tickets.payout_dispatch import (
     is_newly_paid,
@@ -92,6 +93,7 @@ from api.tickets.schemas import (
     RequesterPremisesRead,
     RequesterUserRead,
     ResolveInput,
+    TicketCaseDetailsRead,
     TicketCreate,
     TicketEnvelope,
     TicketFromChat,
@@ -168,13 +170,22 @@ def _redact_internal_claims(custom_fields: dict[str, Any] | None) -> dict[str, A
     return redacted
 
 
-def _ticket_read(ticket: Ticket, principal: Principal) -> TicketRead:
-    """TicketRead с редакцией служебных claims-полей для не-операторов (#202)."""
+def _ticket_read(
+    ticket: Ticket,
+    principal: Principal,
+    *,
+    case_details: TicketCaseDetails | None = None,
+) -> TicketRead:
+    """TicketRead с редакцией служебных claims-полей для не-операторов (#202) и
+    опциональным наполнением `case_details` (#234, явная выборка на карточке)."""
     read = TicketRead.model_validate(ticket)
+    update: dict[str, Any] = {}
     if not principal.is_operator:
-        read = read.model_copy(
-            update={"custom_fields": _redact_internal_claims(read.custom_fields)}
-        )
+        update["custom_fields"] = _redact_internal_claims(read.custom_fields)
+    if case_details is not None:
+        update["case_details"] = TicketCaseDetailsRead.model_validate(case_details)
+    if update:
+        read = read.model_copy(update=update)
     return read
 
 
@@ -420,8 +431,11 @@ async def get_ticket(
     ticket = await TicketRepository(session).get_for_principal(ticket_id, principal)
     if ticket is None:
         raise ProblemException.not_found(detail="Ticket not found")
+    # Детали разбирательства (#234): отдельная выборка после прохождения storage-level
+    # доступа (посторонний уже получил 404). Не-claims заявка → None.
+    case_details = await TicketCaseDetailsRepository(session).get_by_ticket(ticket_id)
     return TicketEnvelope(
-        data=_ticket_read(ticket, principal),
+        data=_ticket_read(ticket, principal, case_details=case_details),
         request_id=_resolve_request_id(x_request_id),
     )
 

@@ -21,6 +21,8 @@ from api.tickets.enums import (
     AccessLevel,
     ActKind,
     AuthorType,
+    CaseType,
+    SigningStatus,
     TicketCaseState,
     TicketChannel,
     TicketDecision,
@@ -203,6 +205,26 @@ class TicketListEnvelope(BaseModel):
     request_id: uuid.UUID
 
 
+class TicketCaseDetailsRead(BaseModel):
+    """Детали претензионного обращения в ответе (контракт `TicketCaseDetails`, §3.11).
+
+    Наполняется на карточке (#234) явной выборкой `TicketCaseDetailsRepository` — связь с
+    Ticket 1:1 по FK, ORM-relationship намеренно не заводится (избегаем lazy-load/N+1).
+    Enum-поля валидируются (ORM хранит как String); act_kind/signing_status — nullable.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    ticket_id: uuid.UUID
+    case_type: CaseType
+    act_kind: ActKind | None = None
+    signing_status: SigningStatus | None = None
+    payload: dict[str, Any]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
 class TicketRead(BaseModel):
     """Представление заявки в ответе (контракт `Ticket`)."""
 
@@ -255,7 +277,7 @@ class TicketRead(BaseModel):
     policy_id: uuid.UUID | None = None
     insurance_event_id: uuid.UUID | None = None
     acceptance_act_id: uuid.UUID | None = None
-    case_details: dict[str, Any] | None = None
+    case_details: TicketCaseDetailsRead | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
