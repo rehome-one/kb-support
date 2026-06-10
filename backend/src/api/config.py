@@ -228,6 +228,21 @@ class Settings(BaseSettings):
     # Доставка решения в ЛК (E10-7 PR-2) переиспользует platform_api_* (тот же сосед
     # rehome.one, что #71) — отдельных ключей нет (паттерн #166 reuse соседа).
 
+    # --- AcceptanceAct (E10-9, #199, ADR-0016 D1). Резолв состояния акта приёмки-передачи
+    # (signing_status, damage_amount) по сети; ПУСТОЙ токен = выключено (резолв инертен,
+    # мягкая деградация). Боевой ClientCredentials — #77. ---
+    acceptance_act_api_base_url: str = Field(
+        default="http://localhost:8093",
+        description="Базовый URL AcceptanceAct (резолв акта приёмки-передачи, E10-9). ADR-0016.",
+    )
+    acceptance_act_api_token: str = Field(
+        default="",
+        description=(
+            "m2m-токен AcceptanceAct (dev/test). ПУСТО → резолв signing_status/damage выключен "
+            "(каскад инертен). Реальный ClientCredentials — #77."
+        ),
+    )
+
     # --- Webhooks (E10-8, #198, ADR-0015). Inbound от страховщика верифицируется
     # HMAC-секретом; ПУСТОЙ insurer_inbound_secret = интеграция выключена (приём
     # отклоняется, fail-closed) — инертно до ops. tolerance — anti-replay допуск. ---
