@@ -52,6 +52,12 @@ def _data(ticket: Ticket, event: WebhookEvent) -> dict[str, Any]:
             # D7: до банковского подтверждения (linked_payment_id) — деньги ещё НЕ ушли.
             "payment_confirmed": ticket.linked_payment_id is not None,
         }
+    if event is WebhookEvent.INSURANCE_EVENT:
+        return {
+            "insurance_event_id": (
+                str(ticket.insurance_event_id) if ticket.insurance_event_id else None
+            ),
+        }
     return {}
 
 

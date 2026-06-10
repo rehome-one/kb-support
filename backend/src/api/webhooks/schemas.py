@@ -60,3 +60,15 @@ class WebhookSubscriptionCreatedEnvelope(BaseModel):
 
     data: WebhookSubscriptionCreated
     request_id: uuid.UUID
+
+
+class InsurerEventIngest(BaseModel):
+    """Тело inbound webhook страховщика (E10-8 PR-C, провизорно — ADR-0015 D8).
+
+    `ticket_number` — наш человекочитаемый номer заявки (страховщик знал его из outbound);
+    `insurance_event_id` — id страхового события на стороне страховщика. Лишние поля запрещены."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ticket_number: str = Field(min_length=1, max_length=64)
+    insurance_event_id: uuid.UUID

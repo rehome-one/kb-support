@@ -1,0 +1,188 @@
+"""Integration-тесты inbound webhook страховщика (E10-8 PR-C #198) — требуют Postgres.
+
+Покрывают: m2m-only (не-SERVICE → 403); config-gate/anti-spoofing (нет секрета или
+невалидная подпись → 403); валидный приём → проставляет insurance_event_id + триггерит
+outbound ticket.insurance_event; идемпотентность по insurance_event_id; 404 на чужую/
+не-INSURANCE заявку. Доставка outbound замокана.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import datetime
+import json
+import os
+import uuid
+from collections.abc import AsyncIterator, Iterator
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
+
+from api.auth.dependencies import get_current_principal
+from api.auth.principal import Principal, PrincipalKind
+from api.config import get_settings
+from api.db import get_session
+from api.main import app
+from api.tickets.enums import TicketTeam
+from api.webhooks.events import WebhookDelivery
+from api.webhooks.signing import compute_signature
+
+pytestmark = pytest.mark.skipif(
+    "CI" not in os.environ and "POSTGRES_AVAILABLE" not in os.environ,
+    reason="Inbound webhook требует живой Postgres (CI service container / POSTGRES_AVAILABLE=1).",
+)
+
+_SECRET = "test-insurer-inbound-secret-1234"
+_INSURER_EVENTS = "/api/v1/support/insurer-events"
+
+_SERVICE = Principal(user_id=uuid.uuid4(), kind=PrincipalKind.SERVICE)
+_OPERATOR = Principal(
+    user_id=uuid.uuid4(), kind=PrincipalKind.OPERATOR, teams=frozenset({TicketTeam.SUPPORT})
+)
+
+
+def _use(principal: Principal) -> None:
+    app.dependency_overrides[get_current_principal] = lambda: principal
+
+
+@pytest.fixture(autouse=True)
+def _override_db_session() -> Iterator[None]:
+    engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def _get_test_session() -> AsyncIterator[AsyncSession]:
+        async with factory() as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+
+    app.dependency_overrides[get_session] = _get_test_session
+    yield
+    app.dependency_overrides.pop(get_session, None)
+    app.dependency_overrides.pop(get_current_principal, None)
+    asyncio.run(engine.dispose())
+
+
+@pytest.fixture
+def client() -> Iterator[TestClient]:
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def _enable_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Включить инбаунд-секрет (по умолчанию пусто → fail-closed)."""
+    replacement = get_settings().model_copy(update={"insurer_inbound_secret": _SECRET})
+    monkeypatch.setattr("api.webhooks.inbound.get_settings", lambda: replacement)
+
+
+def _signed(body: dict[str, str]) -> tuple[bytes, dict[str, str]]:
+    raw = json.dumps(body).encode()
+    ts = int(datetime.datetime.now(datetime.UTC).timestamp())
+    sig = f"t={ts},v1={compute_signature(payload=raw, secret=_SECRET, timestamp=ts)}"
+    return raw, {"Content-Type": "application/json", "X-Signature": sig}
+
+
+def _create_insurance_claim(client: TestClient) -> str:
+    _use(_OPERATOR)
+    created = client.post(
+        "/api/v1/support/tickets", json={"subject": "страховой случай", "type": "INSURANCE"}
+    )
+    assert created.status_code == 201, created.text
+    return str(created.json()["data"]["number"])
+
+
+def test_non_service_principal_forbidden(client: TestClient) -> None:
+    _use(_OPERATOR)
+    raw, headers = _signed(
+        {"ticket_number": "RH-2026-00001", "insurance_event_id": str(uuid.uuid4())}
+    )
+    assert client.post(_INSURER_EVENTS, content=raw, headers=headers).status_code == 403
+
+
+def test_secret_off_is_fail_closed(client: TestClient) -> None:
+    # Дефолтный insurer_inbound_secret пуст → приём отклоняется даже от SERVICE.
+    _use(_SERVICE)
+    raw, headers = _signed(
+        {"ticket_number": "RH-2026-00001", "insurance_event_id": str(uuid.uuid4())}
+    )
+    assert client.post(_INSURER_EVENTS, content=raw, headers=headers).status_code == 403
+
+
+def test_invalid_signature_forbidden(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable_secret(monkeypatch)
+    _use(_SERVICE)
+    body = json.dumps({"ticket_number": "RH-2026-00001", "insurance_event_id": str(uuid.uuid4())})
+    resp = client.post(
+        _INSURER_EVENTS,
+        content=body.encode(),
+        headers={"Content-Type": "application/json", "X-Signature": "t=123,v1=deadbeef"},
+    )
+    assert resp.status_code == 403
+
+
+def test_unknown_or_non_insurance_404(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable_secret(monkeypatch)
+    # неизвестный номер
+    _use(_SERVICE)
+    raw, headers = _signed(
+        {"ticket_number": "RH-9999-99999", "insurance_event_id": str(uuid.uuid4())}
+    )
+    assert client.post(_INSURER_EVENTS, content=raw, headers=headers).status_code == 404
+
+    # существующая, но НЕ INSURANCE (PAYMENT, case_state=None) → 404
+    _use(_OPERATOR)
+    payment = client.post("/api/v1/support/tickets", json={"subject": "s", "type": "PAYMENT"})
+    number = payment.json()["data"]["number"]
+    _use(_SERVICE)
+    raw, headers = _signed({"ticket_number": number, "insurance_event_id": str(uuid.uuid4())})
+    assert client.post(_INSURER_EVENTS, content=raw, headers=headers).status_code == 404
+
+
+def test_valid_sets_event_and_triggers_outbound(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[WebhookDelivery] = []
+
+    async def _fake(url: str, secret: str, delivery: WebhookDelivery, settings: object) -> None:
+        captured.append(delivery)
+
+    monkeypatch.setattr("api.webhooks.dispatcher.deliver_webhook", _fake)
+    _enable_secret(monkeypatch)
+
+    number = _create_insurance_claim(client)
+    # подписка на исходящее insurance_event (чтобы триггер был наблюдаем)
+    _use(
+        Principal(
+            user_id=uuid.uuid4(),
+            kind=PrincipalKind.OPERATOR,
+            scopes=frozenset({"staff_admin"}),
+            teams=frozenset({TicketTeam.SUPPORT}),
+        )
+    )
+    sub = client.post(
+        "/api/v1/support/webhooks",
+        json={
+            "url": f"https://ins-{uuid.uuid4().hex}.example.com/h",
+            "events": ["ticket.insurance_event"],
+        },
+    )
+    assert sub.status_code == 201, sub.text
+
+    event_id = str(uuid.uuid4())
+    _use(_SERVICE)
+    raw, headers = _signed({"ticket_number": number, "insurance_event_id": event_id})
+    resp = client.post(_INSURER_EVENTS, content=raw, headers=headers)
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["data"]["insurance_event_id"] == event_id
+    assert captured, "переход insurance_event_id должен триггерить outbound insurance_event"
+    assert all(d.event == "ticket.insurance_event" for d in captured)
+
+    # Идемпотентность: повтор той же доставки → no-op, без нового триггера.
+    before = len(captured)
+    repeat = client.post(_INSURER_EVENTS, content=raw, headers=headers)
+    assert repeat.status_code == 202
+    assert len(captured) == before, "повтор того же insurance_event_id не должен ретриггерить"

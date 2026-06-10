@@ -228,6 +228,21 @@ class Settings(BaseSettings):
     # Доставка решения в ЛК (E10-7 PR-2) переиспользует platform_api_* (тот же сосед
     # rehome.one, что #71) — отдельных ключей нет (паттерн #166 reuse соседа).
 
+    # --- Webhooks (E10-8, #198, ADR-0015). Inbound от страховщика верифицируется
+    # HMAC-секретом; ПУСТОЙ insurer_inbound_secret = интеграция выключена (приём
+    # отклоняется, fail-closed) — инертно до ops. tolerance — anti-replay допуск. ---
+    insurer_inbound_secret: str = Field(
+        default="",
+        description=(
+            "Секрет HMAC для верификации входящих webhook страховщика. ПУСТО → приём "
+            "отклоняется (fail-closed, интеграция не сконфигурирована). ADR-0015 D8."
+        ),
+    )
+    webhook_timestamp_tolerance_seconds: int = Field(
+        default=300,
+        description="Допуск рассинхрона timestamp подписи webhook, сек (anti-replay, ADR-0015 D3).",
+    )
+
     # --- SLA-воркер (E4-6, #90, ADR-0007 Решение 1). Dramatiq-actor проактивно
     # сканирует БД по дедлайнам и дёргает breach-хук (seam под эскалацию E5/#18).
     # ПУСТОЙ sla_worker_broker_url = выключено (StubBroker, actor инертен) — тот же

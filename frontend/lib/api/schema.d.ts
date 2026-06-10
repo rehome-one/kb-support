@@ -631,6 +631,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/support/insurer-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Приём webhook страховщика (inbound)
+         * @description Inbound от страховщика (m2m kind=SERVICE + HMAC-подпись X-Signature с anti-replay). Проставляет insurance_event_id на claims-заявке INSURANCE и эмитит ticket.insurance_event. Провизорный контракт (ADR-0015 D8) — уточняется при провижининге.
+         */
+        post: operations["createInsurerEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1432,6 +1452,15 @@ export interface components {
             secret?: string;
             /** @default true */
             is_active: boolean;
+        };
+        InsurerEventIngest: {
+            /** @description Человекочитаемый номер нашей заявки (страховщик знал его из outbound). */
+            ticket_number: string;
+            /**
+             * Format: uuid
+             * @description Идентификатор страхового события на стороне страховщика.
+             */
+            insurance_event_id: string;
         };
     };
     responses: {
@@ -2800,6 +2829,35 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    createInsurerEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsurerEventIngest"];
+            };
+        };
+        responses: {
+            /** @description Принято */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseEnvelope"] & {
+                        data?: components["schemas"]["Ticket"];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };
