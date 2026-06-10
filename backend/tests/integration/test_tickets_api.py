@@ -1554,6 +1554,16 @@ def test_terminal_case_keeps_already_closed_status(client: TestClient) -> None:
     assert resp.json()["data"]["status"] == "CLOSED"
 
 
+def test_non_payout_transition_does_not_set_payout_due_at(client: TestClient) -> None:
+    """#212: переход case_state в НЕ-PAYOUT_PENDING (DOCS_PENDING) НЕ выставляет payout_due_at."""
+    _use(_operator())
+    ticket_id = _create(client).json()["data"]["id"]
+    _set_case_state(ticket_id, "CLAIM_SUBMITTED")
+    resp = _action(client, ticket_id, "case-state", case_state="DOCS_PENDING")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["payout_due_at"] is None
+
+
 # --- Приём claims (E10-5 #195) ---
 
 
