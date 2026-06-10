@@ -72,3 +72,19 @@ class InsurerEventIngest(BaseModel):
 
     ticket_number: str = Field(min_length=1, max_length=64)
     insurance_event_id: uuid.UUID
+
+
+class GuaranteeEventIngest(BaseModel):
+    """Тело inbound сигнала платёжного контура о гарантийном исключении (E10-10 PR-A; ADR-0017 D1).
+
+    Системно создаёт GUARANTEE-тикет при исключениях (5.7.6/7/8). `reference` — id сигнала
+    upstream (идемпотентность). Регресс-поля — ССЫЛКИ (деньги/пеню не считаем, D2). extra=forbid."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    exception_kind: str = Field(min_length=1, max_length=64)
+    reference: str = Field(min_length=1, max_length=128)
+    requester_id: uuid.UUID | None = None
+    missed_payment_id: uuid.UUID | None = None
+    regress_obligation_id: uuid.UUID | None = None
+    late_fee_accrued: float | None = Field(default=None, ge=0)

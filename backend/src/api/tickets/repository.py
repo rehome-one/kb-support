@@ -204,6 +204,18 @@ class TicketRepository:
         )
         return (await self._session.execute(stmt)).scalars().first()
 
+    async def find_guarantee_by_reference(self, reference: str) -> Ticket | None:
+        """GUARANTEE-заявка по `custom_fields.guarantee_reference` (идемпотентность приёма
+        сигнала платёжного контура, E10-10 PR-A; m2m-контекст, без visibility-filter).
+
+        JSONB `->>` поиск (не индексирован — uniq-индекс = hardening-follow-up, ADR-0017 A1).
+        Найдена → повторный сигнал не двоит заявку."""
+        stmt = select(Ticket).where(
+            Ticket.type == TicketType.GUARANTEE.value,
+            Ticket.custom_fields["guarantee_reference"].astext == reference,
+        )
+        return (await self._session.execute(stmt)).scalars().first()
+
     async def find_message_by_email_id(self, email_message_id: str) -> TicketMessage | None:
         """Сообщение по Message-ID входящего письма (E7-3, #145) — дедуп идемпотентного
         приёма и recovery после гонки на частичном uniq. Без visibility-filter (m2m)."""
