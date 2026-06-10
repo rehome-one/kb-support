@@ -41,6 +41,7 @@ class TicketHistoryAction(str, enum.Enum):
     CASE_STATE_CHANGED = "case_state_changed"
     PAYOUT_APPROVAL_RECORDED = "payout_approval_recorded"
     CASE_DECIDED = "case_decided"  # E10-3 #193
+    INSURANCE_EVENT_RECEIVED = "insurance_event_received"  # E10-8 PR-C #198 (inbound страховщик)
 
 
 class TicketHistory(Base):

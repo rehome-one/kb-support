@@ -26,3 +26,23 @@ def signature_header(*, payload: bytes, secret: str, timestamp: int) -> str:
     """Значение заголовка `X-Signature` для доставки события подписчику."""
     digest = compute_signature(payload=payload, secret=secret, timestamp=timestamp)
     return f"t={timestamp},v1={digest}"
+
+
+def verify_signature(
+    *, payload: bytes, secret: str, header: str, now: int, tolerance_seconds: int
+) -> bool:
+    """Проверить входящую подпись `X-Signature` (`t=<unix>,v1=<hex>`) — для inbound (PR-C).
+
+    True только при валидной HMAC-подписи И `|now - t| <= tolerance_seconds` (anti-replay,
+    ADR-0015 D3). Любой парс-сбой / несовпадение / просрочка → False (fail-closed). Сравнение
+    подписи — constant-time (`hmac.compare_digest`)."""
+    try:
+        fields = dict(part.split("=", 1) for part in header.split(","))
+        timestamp = int(fields["t"])
+        provided = fields["v1"]
+    except (ValueError, KeyError):
+        return False
+    if abs(now - timestamp) > tolerance_seconds:
+        return False
+    expected = compute_signature(payload=payload, secret=secret, timestamp=timestamp)
+    return hmac.compare_digest(expected, provided)

@@ -24,6 +24,7 @@ def test_spec_loads_and_has_core_paths() -> None:
     assert "/api/v1/support/tickets/from-web-form" in SPEC["paths"]
     assert "/api/v1/support/tickets/from-email" in SPEC["paths"]
     assert "/api/v1/support/stats" in SPEC["paths"]
+    assert "/api/v1/support/insurer-events" in SPEC["paths"]
     for schema in (
         "Ticket",
         "TicketSummary",
@@ -33,6 +34,7 @@ def test_spec_loads_and_has_core_paths() -> None:
         "WebFormTicketCreate",
         "EmailIngest",
         "SupportStats",
+        "InsurerEventIngest",
     ):
         assert schema in SPEC["components"]["schemas"]
 
@@ -569,6 +571,39 @@ def test_webhook_responses_conform(admin_client: TestClient) -> None:
     assert listed.status_code == 200
     assert listed.json()["data"], "ожидалась ≥1 подписка для валидации WebhookSubscription"
     assert_response_conforms("/api/v1/support/webhooks", "get", "200", listed.json())
+
+
+@requires_postgres
+def test_insurer_event_response_conforms(
+    service_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AT-002 (#198 PR-C): createInsurerEvent (202) соответствует Ticket."""
+    import datetime
+    import json as _json
+
+    from api.config import get_settings
+    from api.webhooks.signing import compute_signature
+
+    created = service_client.post(
+        "/api/v1/support/tickets", json={"subject": "страховой", "type": "INSURANCE"}
+    )
+    assert created.status_code == 201, created.text
+    number = created.json()["data"]["number"]
+
+    secret = "contract-insurer-secret-12345"
+    replacement = get_settings().model_copy(update={"insurer_inbound_secret": secret})
+    monkeypatch.setattr("api.webhooks.inbound.get_settings", lambda: replacement)
+
+    raw = _json.dumps({"ticket_number": number, "insurance_event_id": str(uuid.uuid4())}).encode()
+    ts = int(datetime.datetime.now(datetime.UTC).timestamp())
+    sig = f"t={ts},v1={compute_signature(payload=raw, secret=secret, timestamp=ts)}"
+    resp = service_client.post(
+        "/api/v1/support/insurer-events",
+        content=raw,
+        headers={"Content-Type": "application/json", "X-Signature": sig},
+    )
+    assert resp.status_code == 202, resp.text
+    assert_response_conforms("/api/v1/support/insurer-events", "post", "202", resp.json())
 
 
 def test_prism_mock_serves_tickets(prism_mock: str) -> None:

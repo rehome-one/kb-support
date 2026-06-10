@@ -1582,6 +1582,40 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/support/insurer-events:
+    post:
+      tags:
+      - Webhooks
+      summary: Приём webhook страховщика (inbound)
+      description: >-
+        Inbound от страховщика (m2m kind=SERVICE + HMAC-подпись X-Signature с anti-replay).
+        Проставляет insurance_event_id на claims-заявке INSURANCE и эмитит ticket.insurance_event.
+        Провизорный контракт (ADR-0015 D8) — уточняется при провижининге.
+      operationId: createInsurerEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InsurerEventIngest'
+      responses:
+        '202':
+          description: Принято
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Ticket'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 components:
   securitySchemes:
     BearerAuth:
@@ -3304,6 +3338,20 @@ components:
         is_active:
           type: boolean
           default: true
+    InsurerEventIngest:
+      type: object
+      required:
+      - ticket_number
+      - insurance_event_id
+      properties:
+        ticket_number:
+          type: string
+          maxLength: 64
+          description: Человекочитаемый номер нашей заявки (страховщик знал его из outbound).
+        insurance_event_id:
+          type: string
+          format: uuid
+          description: Идентификатор страхового события на стороне страховщика.
   responses:
     BadRequest:
       description: Некорректный запрос
